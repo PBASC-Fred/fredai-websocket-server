@@ -46,7 +46,7 @@ slots:
 
 responses:
   utter_greet:
-  - text: "Hello! I'm your Financial AI Advisor. How can I help you with your financial questions today?"
+  - text: "Hello! I'm your Trusted AI Advisor. I can help you with taxes, budgeting, savings, and generate finance-related images. How can I assist you today?"
 
   utter_cheer_up:
   - text: "Here is something to cheer you up:"
@@ -59,10 +59,10 @@ responses:
   - text: "Great, carry on!"
 
   utter_goodbye:
-  - text: "Thank you for using FredAi.io! Have a great day and remember to make smart financial decisions!"
+  - text: "Thank you for using FredAi! Have a great day and remember to make smart financial decisions!"
 
   utter_iamabot:
-  - text: "I am FredAi.io, your AI-powered financial advisor. I can help you with investment advice, budgeting, savings strategies, and even generate images related to finance!"
+  - text: "I am FredAi, your Trusted AI Advisor. I can help you with taxes, budgeting, savings strategies, investment advice, and generate finance-related images!"
 
 actions:
   - action_financial_advice

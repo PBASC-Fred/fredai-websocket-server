@@ -131,10 +131,10 @@ const ChatInterface = () => {
           size="small"
         />
         <Typography variant="h6" sx={{ mt: 1 }}>
-          Financial AI Advisor Chat
+          Trusted AI Advisor Chat
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Ask questions about financial advice or use "/imagine [prompt]" for image generation
+          Get help with taxes, budgeting, savings, and use "/imagine [prompt]" for finance-related image generation
         </Typography>
       </Box>
 
@@ -143,7 +143,7 @@ const ChatInterface = () => {
           {messages.length === 0 && (
             <ListItem>
               <Typography variant="body1" color="text.secondary" sx={{ textAlign: 'center', width: '100%' }}>
-                Welcome! Start a conversation with your Financial AI Advisor.
+                Welcome! I'm your Trusted AI Advisor. I can help with taxes, budgeting, savings, and generate finance-related images.
               </Typography>
             </ListItem>
           )}
@@ -168,7 +168,7 @@ const ChatInterface = () => {
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Type your message or '/imagine [prompt]' for image generation..."
+            placeholder="Ask about taxes, budgeting, savings, or '/imagine [prompt]' for finance images..."
             disabled={!connected || isLoading}
             variant="outlined"
           />

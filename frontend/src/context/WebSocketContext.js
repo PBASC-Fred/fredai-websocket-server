@@ -17,7 +17,7 @@ export const WebSocketProvider = ({ children }) => {
   const [messages, setMessages] = useState([]);
 
   useEffect(() => {
-    const newSocket = io(process.env.REACT_APP_WEBSOCKET_URL || 'ws://localhost:5005');
+    const newSocket = io(process.env.REACT_APP_WEBSOCKET_URL || 'http://localhost:3001');
     
     newSocket.on('connect', () => {
       setConnected(true);

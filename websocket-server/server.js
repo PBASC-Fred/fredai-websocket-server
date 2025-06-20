@@ -11,10 +11,13 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"]
+    origin: ["http://localhost:3000", "http://localhost:3002"],
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
+
+console.log('Socket.IO server configured with CORS for:', ["http://localhost:3000", "http://localhost:3002"]);
 
 app.use(cors());
 app.use(express.json());
@@ -26,7 +29,7 @@ const dbConfig = {
   database: process.env.MYSQL_DATABASE || 'fredai_db'
 };
 
-const emailTransporter = nodemailer.createTransporter({
+const emailTransporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_ADDRESS,
@@ -71,6 +74,10 @@ async function initDatabase() {
       CREATE TABLE IF NOT EXISTS suggestions (
         id INT AUTO_INCREMENT PRIMARY KEY,
         suggestion TEXT NOT NULL,
+        name VARCHAR(255) NULL,
+        email VARCHAR(255) NULL,
+        is_anonymous BOOLEAN DEFAULT TRUE,
+        want_response BOOLEAN DEFAULT FALSE,
         submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         email_sent BOOLEAN DEFAULT FALSE
       )
@@ -122,13 +129,19 @@ async function saveMessage(sessionId, messageType, content) {
   }
 }
 
-async function saveSuggestion(suggestion) {
+async function saveSuggestion(suggestionData) {
   try {
     const db = await mysql.createConnection(dbConfig);
     
     const [result] = await db.execute(
-      'INSERT INTO suggestions (suggestion) VALUES (?)',
-      [suggestion]
+      'INSERT INTO suggestions (suggestion, name, email, is_anonymous, want_response) VALUES (?, ?, ?, ?, ?)',
+      [
+        suggestionData.suggestion,
+        suggestionData.name || null,
+        suggestionData.email || null,
+        suggestionData.isAnonymous,
+        suggestionData.wantResponse
+      ]
     );
     
     await db.end();
@@ -139,17 +152,32 @@ async function saveSuggestion(suggestion) {
   }
 }
 
-async function sendEmailSuggestion(suggestion) {
+async function sendEmailSuggestion(suggestionData) {
   try {
+    const contactInfo = suggestionData.isAnonymous ? 
+      '<p style="font-size: 14px; color: #666;"><em>Submitted anonymously</em></p>' :
+      `<div style="background-color: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px;">
+        <h3 style="color: #014B7B; margin-top: 0;">Contact Information:</h3>
+        <p style="margin: 5px 0;"><strong>Name:</strong> ${suggestionData.name || 'Not provided'}</p>
+        <p style="margin: 5px 0;"><strong>Email:</strong> ${suggestionData.email || 'Not provided'}</p>
+        <p style="margin: 5px 0;"><strong>Wants Response:</strong> ${suggestionData.wantResponse ? 'Yes' : 'No'}</p>
+      </div>`;
+
     const mailOptions = {
       from: process.env.EMAIL_ADDRESS,
       to: 'professionalbusinessadvisory@gmail.com',
-      subject: 'New Service Suggestion for PBASC',
+      subject: `New Service Suggestion for FredAi ${suggestionData.isAnonymous ? '(Anonymous)' : ''}`,
       html: `
         <html><body>
           <h2 style="color: #014B7B;">New Service Suggestion</h2>
-          <p style="font-size: 16px;">A new suggestion has been submitted via the PBASC chatbot:</p>
-          <p style="font-size: 16px; color: #4CAF50;">"${suggestion}"</p>
+          <p style="font-size: 16px;">A new suggestion has been submitted via the FredAi Trusted AI Advisor:</p>
+          <div style="background-color: #e8f5e8; padding: 15px; margin: 15px 0; border-left: 4px solid #4CAF50; border-radius: 5px;">
+            <p style="font-size: 16px; margin: 0; color: #2e7d32;">"${suggestionData.suggestion}"</p>
+          </div>
+          ${contactInfo}
+          <p style="font-size: 12px; color: #888; margin-top: 20px;">
+            Submitted on: ${new Date().toLocaleString()}
+          </p>
         </body></html>
       `
     };
@@ -162,13 +190,21 @@ async function sendEmailSuggestion(suggestion) {
   }
 }
 
+console.log('WebSocket server initialized, waiting for connections...');
+
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  console.log('NEW CLIENT CONNECTED:', socket.id);
+  console.log('Total connected clients:', io.engine.clientsCount);
   const sessionId = socket.id;
+  
+  socket.onAny((eventName, ...args) => {
+    console.log('Received event:', eventName, 'with args:', args);
+  });
 
   socket.on('user_message', async (data) => {
     const { message } = data;
     console.log('Received user message:', message);
+    console.log('Full data received:', JSON.stringify(data));
 
     await saveMessage(sessionId, 'user', message);
 
@@ -276,7 +312,7 @@ app.get('/api/faq', async (req, res) => {
 
 app.post('/api/suggestions', async (req, res) => {
   try {
-    const { suggestion } = req.body;
+    const { suggestion, name, email, isAnonymous, wantResponse } = req.body;
     
     if (!suggestion || !suggestion.trim()) {
       return res.status(400).json({ 
@@ -285,8 +321,23 @@ app.post('/api/suggestions', async (req, res) => {
       });
     }
 
-    const suggestionId = await saveSuggestion(suggestion.trim());
-    await sendEmailSuggestion(suggestion.trim());
+    if (!isAnonymous && wantResponse && (!email || !email.trim())) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Email is required if you want to receive a response' 
+      });
+    }
+
+    const suggestionData = {
+      suggestion: suggestion.trim(),
+      name: name ? name.trim() : null,
+      email: email ? email.trim() : null,
+      isAnonymous: Boolean(isAnonymous),
+      wantResponse: Boolean(wantResponse)
+    };
+
+    const suggestionId = await saveSuggestion(suggestionData);
+    await sendEmailSuggestion(suggestionData);
 
     const db = await mysql.createConnection(dbConfig);
     await db.execute(

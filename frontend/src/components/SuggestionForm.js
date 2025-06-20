@@ -7,13 +7,20 @@ import {
   Paper,
   Container,
   Alert,
-  CircularProgress
+  CircularProgress,
+  FormControlLabel,
+  Checkbox,
+  Divider
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import axios from 'axios';
 
 const SuggestionForm = () => {
   const [suggestion, setSuggestion] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [wantResponse, setWantResponse] = useState(false);
+  const [isAnonymous, setIsAnonymous] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
 
@@ -29,13 +36,26 @@ const SuggestionForm = () => {
     setMessage({ type: '', text: '' });
 
     try {
-      const response = await axios.post('/api/suggestions', {
-        suggestion: suggestion.trim()
-      });
+      const submissionData = {
+        suggestion: suggestion.trim(),
+        isAnonymous,
+        wantResponse
+      };
+
+      if (!isAnonymous) {
+        submissionData.name = name.trim();
+        submissionData.email = email.trim();
+      }
+
+      const response = await axios.post('http://localhost:3001/api/suggestions', submissionData);
 
       if (response.data.success) {
         setMessage({ type: 'success', text: 'Thank you! Your suggestion has been sent successfully.' });
         setSuggestion('');
+        setName('');
+        setEmail('');
+        setWantResponse(false);
+        setIsAnonymous(false);
       } else {
         setMessage({ type: 'error', text: response.data.message || 'Failed to send suggestion.' });
       }
@@ -63,7 +83,7 @@ const SuggestionForm = () => {
           Share Your Suggestions
         </Typography>
         <Typography variant="body1" color="text.secondary" align="center" sx={{ mb: 4 }}>
-          We value your feedback! Share your ideas and suggestions to help us improve our services.
+          We value your feedback! Share your ideas and suggestions to help us improve our services. You can submit anonymously or provide contact information if you'd like a response.
         </Typography>
 
         {message.text && (
@@ -93,6 +113,62 @@ const SuggestionForm = () => {
             }}
             helperText={`${suggestion.length}/1000 characters | Press Ctrl+Enter to submit`}
           />
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={isAnonymous}
+                onChange={(e) => setIsAnonymous(e.target.checked)}
+                disabled={loading}
+              />
+            }
+            label="Submit anonymously"
+            sx={{ mb: 2 }}
+          />
+
+          {!isAnonymous && (
+            <>
+              <Divider sx={{ mb: 3 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Contact Information (Optional)
+                </Typography>
+              </Divider>
+
+              <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
+                <TextField
+                  fullWidth
+                  label="Your Name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  variant="outlined"
+                  disabled={loading}
+                  placeholder="Enter your name"
+                />
+                <TextField
+                  fullWidth
+                  label="Email Address"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  variant="outlined"
+                  disabled={loading}
+                  placeholder="Enter your email"
+                />
+              </Box>
+
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={wantResponse}
+                    onChange={(e) => setWantResponse(e.target.checked)}
+                    disabled={loading}
+                  />
+                }
+                label="I would like to receive a response to my suggestion"
+                sx={{ mb: 3 }}
+              />
+            </>
+          )}
 
           <Box sx={{ display: 'flex', justifyContent: 'center' }}>
             <Button
