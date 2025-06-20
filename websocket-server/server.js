@@ -11,7 +11,13 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://localhost:3002"],
+    origin: [
+      "http://localhost:3000", 
+      "http://localhost:3002",
+      "https://fredai-pbasc-trustedadvisor-project-2025-kfzj7qzsn.vercel.app",
+      /\.railway\.app$/,
+      /\.vercel\.app$/
+    ],
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -353,7 +359,7 @@ app.post('/api/suggestions', async (req, res) => {
 const PORT = process.env.WEBSOCKET_PORT || 3001;
 
 initDatabase().then(() => {
-  server.listen(PORT, () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`WebSocket server running on port ${PORT}`);
   });
 });
