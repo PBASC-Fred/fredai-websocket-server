@@ -1,20 +1,20 @@
-# FredAi.io - Financial AI Advisor
+# FredAi - Trusted AI Advisor
 
-A modern, distributed financial AI advisor application built with React.js frontend, Rasa conversational AI backend, WebSocket communication layer, and MySQL database.
+A modern, distributed financial AI advisor application built with React.js frontend, WebSocket communication layer, and PostgreSQL database.
 
 ## Architecture
 
 - **Frontend**: React.js with Material-UI for responsive client-side rendering
-- **Backend**: Rasa Pro for conversational AI with custom actions
-- **Communication**: Socket.IO WebSocket server for real-time bidirectional communication
-- **Database**: MySQL for persistent storage of chat history, suggestions, and FAQ data
-- **APIs**: Gemini 1.5 Pro for financial advice, Stability AI for image generation
+- **Backend**: WebSocket server with direct API integrations
+- **Communication**: Native WebSocket for real-time bidirectional communication
+- **Database**: PostgreSQL for persistent storage of chat history, suggestions, and FAQ data
+- **APIs**: Gemini AI for financial advice, Stability AI for image generation
 
 ## Features
 
-- 💬 Real-time chat with AI financial advisor
-- 🖼️ AI-powered image generation with `/imagine` commands
-- 📧 Suggestion submission with email notifications
+- 💬 Real-time chat with AI financial advisor focused on taxes, budgeting, and savings
+- 🖼️ AI-powered image generation for finance-related visuals
+- 📧 Enhanced suggestion submission with optional contact information
 - ❓ Comprehensive FAQ system
 - 💾 Persistent chat history and session management
 - 📱 Responsive design for all devices
@@ -23,25 +23,19 @@ A modern, distributed financial AI advisor application built with React.js front
 
 ### Prerequisites
 
-- Node.js 16+ and npm/yarn
-- Python 3.10 or 3.11
-- MySQL 8.0+
-- API keys for Gemini and Stability AI
+- Node.js 18+ and npm
+- PostgreSQL 14+
+- API keys for Gemini AI and Stability AI
 
 ### Installation
 
 1. **Clone the repository**
    ```bash
-   git clone https://gitlab.com/pbasc/fredai.git
-   cd fredai
+   git clone https://github.com/PBASC-Fred/fredai-websocket-server.git
+   cd fredai-websocket-server
    ```
 
-2. **Set up MySQL Database**
-   ```bash
-   mysql -u root -p < database/init.sql
-   ```
-
-3. **Install and start WebSocket server**
+2. **Install and start WebSocket server**
    ```bash
    cd websocket-server
    npm install
@@ -49,17 +43,7 @@ A modern, distributed financial AI advisor application built with React.js front
    npm start
    ```
 
-4. **Install and start Rasa backend**
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   cp .env.example .env  # Configure your API keys
-   rasa train
-   rasa run --enable-api --cors "*" &
-   rasa run actions &
-   ```
-
-5. **Install and start React frontend**
+3. **Install and start React frontend**
    ```bash
    cd frontend
    npm install
@@ -69,51 +53,34 @@ A modern, distributed financial AI advisor application built with React.js front
 
 ### Environment Variables
 
-Create `.env` files in each component directory:
+⚠️ **Do not commit real credentials. Replace the values below in your .env file and add it to .gitignore.**
 
-**Frontend (.env)**
-```
-REACT_APP_WEBSOCKET_URL=ws://localhost:3001
-REACT_APP_API_BASE_URL=http://localhost:3001
-```
+Copy `.env.example` to `.env` and fill in your own values:
 
-**WebSocket Server (.env)**
-```
-MYSQL_HOST=localhost
-MYSQL_USER=root
-MYSQL_PASSWORD=your_password
-MYSQL_DATABASE=fredai_db
-EMAIL_ADDRESS=your_email@gmail.com
-EMAIL_PASSWORD=your_app_password
-WEBSOCKET_PORT=3001
-RASA_SERVER_URL=http://localhost:5005
+```bash
+cp websocket-server/.env.example websocket-server/.env
+cp frontend/.env.example frontend/.env
 ```
 
-**Rasa Backend (.env)**
-```
-GEMINI_API_KEY=your_gemini_api_key
-IMAGE_API_KEY=your_stability_ai_key
-EMAIL_ADDRESS=your_email@gmail.com
-EMAIL_PASSWORD=your_app_password
-```
+See `.env.example` files for required environment variables.
 
 ## Usage
 
 1. Open http://localhost:3000 in your browser
-2. Start chatting with the financial AI advisor
-3. Use `/imagine [prompt]` for image generation
+2. Start chatting with the trusted AI advisor about taxes, budgeting, and savings
+3. Use `/imagine [prompt]` for finance-related image generation
 4. Browse FAQ section for common questions
-5. Submit suggestions through the dedicated form
+5. Submit suggestions with optional contact information
 
 ## Development
 
 ### Project Structure
 ```
-fredai/
+fredai-websocket-server/
 ├── frontend/          # React.js application
-├── backend/           # Rasa conversational AI
-├── websocket-server/  # Socket.IO communication layer
-├── database/          # MySQL schema and initialization
+├── websocket-server/  # WebSocket communication server
+├── package.json       # Root package configuration
+├── railway.toml       # Railway deployment configuration
 └── README.md
 ```
 
@@ -121,34 +88,45 @@ fredai/
 
 - **ChatInterface**: Real-time chat with WebSocket integration
 - **FAQ**: Dynamic FAQ system with categorized questions
-- **SuggestionForm**: User feedback submission with email notifications
+- **SuggestionForm**: Enhanced user feedback submission with contact options
 - **WebSocketContext**: React context for managing WebSocket connections
 
 ### API Endpoints
 
 - `POST /api/suggestions` - Submit user suggestions
 - `GET /api/faq` - Retrieve FAQ data
-- WebSocket events: `user_message`, `bot_response`, `image_request`, `image_response`
+- WebSocket events: `chat`, `bot`, `image`
 
-## Deployment
+## Railway Deployment
 
-The application is designed for containerized deployment with Docker Compose or Kubernetes. Each component can be scaled independently.
+This application is configured for Railway deployment using their GitHub integration:
+
+1. **Push to GitHub**: Code is pushed to GitHub repository
+2. **Railway Project**: Create new project from GitHub repo
+3. **PostgreSQL Plugin**: Add PostgreSQL database as a plugin
+4. **Environment Variables**: Configure required API keys and credentials
+5. **Automatic Deployment**: Railway builds and deploys automatically
+
+### GitHub Repository Setup:
+The application is configured for Railway's "Deploy from GitHub Repo" workflow:
+1. Push code to GitHub repository
+2. Connect Railway project to GitHub repository
+3. Add PostgreSQL plugin to Railway project
+4. Configure environment variables in Railway dashboard
+5. Deploy automatically via Railway's GitHub integration
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Submit a merge request
+4. Submit a pull request
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Support
-
-For support and questions, please contact: professionalbusinessadvisory@gmail.com
-
 ## Live Deployment
-- **Frontend**: https://fredai-pbasc-trustedadvisor-project-2025.vercel.app
-- **Status**: Professional URL updated from jeff-jacksons-projects branding
+- **Frontend**: https://fredai-pbasc-trustedadvisor-project-2025-kfzj7qzsn.vercel.app
+- **Backend**: Railway deployment in progress
+- **Status**: Migrated from Socket.IO + Rasa to simplified WebSocket + PostgreSQL architecture for Railway deployment

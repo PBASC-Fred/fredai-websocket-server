@@ -1,0 +1,14 @@
+{
+  "name": "fredai-trusted-advisor",
+  "version": "1.0.0",
+  "description": "FredAi - Trusted AI Advisor with WebSocket + PostgreSQL architecture",
+  "main": "websocket-server/server.js",
+  "scripts": {
+    "start": "cd websocket-server && npm start",
+    "build": "cd frontend && npm install && npm run build",
+    "install-all": "cd websocket-server && npm install && cd ../frontend && npm install"
+  },
+  "keywords": ["ai", "financial", "advisor", "websocket", "postgresql"],
+  "author": "PBASC",
+  "license": "MIT"
+}

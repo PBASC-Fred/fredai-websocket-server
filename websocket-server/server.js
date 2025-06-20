@@ -43,7 +43,7 @@ const emailTransporter = nodemailer.createTransport({
 
 async function initDatabase() {
   try {
-    const client = await pool.connect();
+    const client = await db.connect();
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -106,7 +106,7 @@ async function initDatabase() {
 
 async function saveMessage(sessionId, messageType, content) {
   try {
-    const client = await pool.connect();
+    const client = await db.connect();
     
     await client.query(
       'INSERT INTO chat_sessions (session_id) VALUES ($1) ON CONFLICT (session_id) DO NOTHING',
@@ -126,7 +126,7 @@ async function saveMessage(sessionId, messageType, content) {
 
 async function saveSuggestion(suggestionData) {
   try {
-    const client = await pool.connect();
+    const client = await db.connect();
     
     const result = await client.query(
       'INSERT INTO suggestions (suggestion, name, email, is_anonymous, want_response) VALUES ($1, $2, $3, $4, $5) RETURNING id',
@@ -185,87 +185,117 @@ async function sendEmailSuggestion(suggestionData) {
   }
 }
 
-console.log('WebSocket server initialized, waiting for connections...');
-
-io.on('connection', (socket) => {
-  console.log('NEW CLIENT CONNECTED:', socket.id);
-  console.log('Total connected clients:', io.engine.clientsCount);
-  const sessionId = socket.id;
-  
-  socket.onAny((eventName, ...args) => {
-    console.log('Received event:', eventName, 'with args:', args);
-  });
-
-  socket.on('user_message', async (data) => {
-    const { message } = data;
-    console.log('Received user message:', message);
-    console.log('Full data received:', JSON.stringify(data));
-
-    await saveMessage(sessionId, 'user', message);
-
-    try {
-      const response = await axios.post('http://localhost:5005/webhooks/rest/webhook', {
-        sender: sessionId,
-        message: message
-      });
-
-      if (response.data && response.data.length > 0) {
-        const botResponse = response.data[0];
-        await saveMessage(sessionId, 'bot', botResponse.text);
-        
-        socket.emit('bot_response', {
-          text: botResponse.text,
-          timestamp: new Date()
-        });
+async function callGeminiAPI(message) {
+  try {
+    const response = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        contents: [{
+          parts: [{
+            text: `You are FredAi, a trusted AI advisor specializing in taxes, budgeting, savings, and financial planning. Provide helpful, accurate financial advice. User message: ${message}`
+          }]
+        }]
       }
-    } catch (error) {
-      console.error('Error communicating with Rasa:', error);
-      socket.emit('bot_response', {
-        text: 'Sorry, I encountered an error. Please try again.',
-        timestamp: new Date()
-      });
-    }
-  });
+    );
+    
+    return response.data.candidates[0].content.parts[0].text;
+  } catch (error) {
+    console.error('Error calling Gemini API:', error);
+    return 'Sorry, I encountered an error processing your request. Please try again.';
+  }
+}
 
-  socket.on('image_request', async (data) => {
-    const { prompt } = data;
-    console.log('Received image request:', prompt);
-
-    await saveMessage(sessionId, 'user', `/imagine ${prompt}`);
-
-    try {
-      const response = await axios.post('http://localhost:5005/webhooks/rest/webhook', {
-        sender: sessionId,
-        message: `/imagine ${prompt}`
-      });
-
-      if (response.data && response.data.length > 0) {
-        const botResponse = response.data[0];
-        if (botResponse.image) {
-          await saveMessage(sessionId, 'image', botResponse.image);
-          socket.emit('image_response', {
-            image_url: botResponse.image,
-            timestamp: new Date()
-          });
+async function generateImage(prompt) {
+  try {
+    const response = await axios.post(
+      'https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image',
+      {
+        text_prompts: [{ text: `Financial concept: ${prompt}` }],
+        cfg_scale: 7,
+        height: 1024,
+        width: 1024,
+        samples: 1,
+        steps: 30
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.IMAGE_API_KEY}`,
+          'Content-Type': 'application/json'
         }
       }
-    } catch (error) {
-      console.error('Error generating image:', error);
-      socket.emit('bot_response', {
-        text: 'Sorry, I encountered an error generating the image. Please try again.',
+    );
+
+    if (response.data.artifacts && response.data.artifacts.length > 0) {
+      return `data:image/png;base64,${response.data.artifacts[0].base64}`;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error generating image:', error);
+    return null;
+  }
+}
+
+wss.on('connection', ws => {
+  console.log('WebSocket client connected');
+  const sessionId = Math.random().toString(36).substring(7);
+
+  ws.on('message', async message => {
+    try {
+      const data = JSON.parse(message);
+      console.log('Received:', data);
+
+      if (data.type === 'chat') {
+        await saveMessage(sessionId, 'user', data.message);
+        
+        if (data.message.startsWith('/imagine ')) {
+          const prompt = data.message.substring(9);
+          const imageUrl = await generateImage(prompt);
+          
+          if (imageUrl) {
+            await saveMessage(sessionId, 'image', imageUrl);
+            ws.send(JSON.stringify({
+              type: 'image',
+              content: imageUrl,
+              timestamp: new Date()
+            }));
+          } else {
+            ws.send(JSON.stringify({
+              type: 'bot',
+              content: 'Sorry, I could not generate an image for that prompt.',
+              timestamp: new Date()
+            }));
+          }
+        } else {
+          const botResponse = await callGeminiAPI(data.message);
+          await saveMessage(sessionId, 'bot', botResponse);
+          
+          ws.send(JSON.stringify({
+            type: 'bot',
+            content: botResponse,
+            timestamp: new Date()
+          }));
+        }
+      }
+    } catch (err) {
+      console.error('Message processing error:', err);
+      ws.send(JSON.stringify({
+        type: 'error',
+        content: 'Error processing message',
         timestamp: new Date()
-      });
+      }));
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-  });
+  ws.send(JSON.stringify({
+    type: 'welcome',
+    content: 'Welcome to FredAi - Trusted AI Advisor! I can help with taxes, budgeting, savings, and financial planning. Use /imagine [prompt] for financial concept images.',
+    timestamp: new Date()
+  }));
 });
 
 app.get('/api/faq', async (req, res) => {
   try {
-    const client = await pool.connect();
+    const client = await db.connect();
     
     const result = await client.query(`
       SELECT fc.id, fc.category_name, fi.question, fi.answer
@@ -336,7 +366,7 @@ app.post('/api/suggestions', async (req, res) => {
     const suggestionId = await saveSuggestion(suggestionData);
     await sendEmailSuggestion(suggestionData);
 
-    const client = await pool.connect();
+    const client = await db.connect();
     await client.query(
       'UPDATE suggestions SET email_sent = TRUE WHERE id = $1',
       [suggestionId]
@@ -356,10 +386,10 @@ app.post('/api/suggestions', async (req, res) => {
   }
 });
 
-const PORT = process.env.WEBSOCKET_PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 initDatabase().then(() => {
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`WebSocket server running on port ${PORT}`);
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
   });
 });

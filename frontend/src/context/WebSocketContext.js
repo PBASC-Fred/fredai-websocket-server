@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import io from 'socket.io-client';
 
 const WebSocketContext = createContext();
 
@@ -17,35 +16,49 @@ export const WebSocketProvider = ({ children }) => {
   const [messages, setMessages] = useState([]);
 
   useEffect(() => {
-    const newSocket = io(process.env.REACT_APP_WEBSOCKET_URL || 'http://localhost:3001');
+    const wsUrl = process.env.REACT_APP_WEBSOCKET_URL || 'ws://localhost:3000';
+    const newSocket = new WebSocket(wsUrl);
     
-    newSocket.on('connect', () => {
+    newSocket.onopen = () => {
       setConnected(true);
       console.log('Connected to WebSocket server');
-    });
+    };
 
-    newSocket.on('disconnect', () => {
+    newSocket.onclose = () => {
       setConnected(false);
       console.log('Disconnected from WebSocket server');
-    });
+    };
 
-    newSocket.on('bot_response', (data) => {
-      setMessages(prev => [...prev, {
-        id: Date.now(),
-        type: 'bot',
-        content: data.text,
-        timestamp: new Date()
-      }]);
-    });
-
-    newSocket.on('image_response', (data) => {
-      setMessages(prev => [...prev, {
-        id: Date.now(),
-        type: 'image',
-        content: data.image_url,
-        timestamp: new Date()
-      }]);
-    });
+    newSocket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'welcome') {
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            type: 'bot',
+            content: data.content,
+            timestamp: new Date(data.timestamp)
+          }]);
+        } else if (data.type === 'bot') {
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            type: 'bot',
+            content: data.content,
+            timestamp: new Date(data.timestamp)
+          }]);
+        } else if (data.type === 'image') {
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            type: 'image',
+            content: data.content,
+            timestamp: new Date(data.timestamp)
+          }]);
+        }
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
+    };
 
     setSocket(newSocket);
 
@@ -64,7 +77,10 @@ export const WebSocketProvider = ({ children }) => {
       };
       
       setMessages(prev => [...prev, userMessage]);
-      socket.emit('user_message', { message });
+      socket.send(JSON.stringify({
+        type: 'chat',
+        message: message
+      }));
     }
   };
 
@@ -78,7 +94,10 @@ export const WebSocketProvider = ({ children }) => {
       };
       
       setMessages(prev => [...prev, userMessage]);
-      socket.emit('image_request', { prompt });
+      socket.send(JSON.stringify({
+        type: 'chat',
+        message: `/imagine ${prompt}`
+      }));
     }
   };
 
