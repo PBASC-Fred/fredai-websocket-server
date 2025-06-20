@@ -148,3 +148,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Support
 
 For support and questions, please contact: professionalbusinessadvisory@gmail.com
+# Vercel Root Directory Fix Applied
