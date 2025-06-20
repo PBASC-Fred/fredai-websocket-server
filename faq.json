@@ -1,0 +1,68 @@
+[
+  {
+    "category": "Brand",
+    "faqs": [
+      {
+        "question": "What is Impact Ventures?",
+        "answer": "Impact Ventures is a brand that curates premium colognes and AI models, blending craftsmanship with cutting-edge innovation. We celebrate timeless elegance, luxury, and quality."
+      },
+      {
+        "question": "Where are you based?",
+        "answer": "We operate online, serving customers worldwide with exclusive fragrances and AI-powered product recommendations."
+      }
+    ]
+  },
+  {
+    "category": "Ordering & Shipping",
+    "faqs": [
+      {
+        "question": "How can I place an order?",
+        "answer": "Simply browse our collection, select your favorite cologne, and proceed to checkout. We accept major payment methods for a seamless experience."
+      },
+      {
+        "question": "Do you offer international shipping?",
+        "answer": "Yes! We ship globally. Shipping rates and delivery times vary based on location."
+      },
+      {
+        "question": "How long does shipping take?",
+        "answer": "Orders are processed within 1-2 business days. Delivery typically takes 5-10 business days, depending on your location."
+      }
+    ]
+  },
+  {
+    "category": "Product",
+    "faqs": [
+      {
+        "question": "Are your colognes made with natural ingredients?",
+        "answer": "We prioritize high-quality, ethically sourced ingredients. Each fragrance is carefully crafted with a blend of natural and refined synthetics for longevity and depth."
+      },
+      {
+        "question": "How should I apply cologne for best results?",
+        "answer": "Apply to pulse points—wrists, neck, and behind the ears—for a lasting, well-balanced scent. Avoid rubbing the fragrance after application."
+      },
+      {
+        "question": "Do you have a loyalty program?",
+        "answer": "Yes! Our members enjoy exclusive discounts, early access to new releases, and personalized recommendations from our AI model based on their fragrance preferences."
+      },
+      {
+        "question": "Do you offer samples?",
+        "answer": "We do not provide sample packs right now"
+      }
+    ]
+  },
+  {
+    "category": "Returns & Support",
+    "faqs": [
+      {
+        "question": "Can I return or exchange a cologne?",
+        "answer": "We accept returns within 30 days of purchase if the product is unopened and unused. Contact our support team for assistance."
+
+      },
+      {
+        "question": "My order arrived damaged. What should I do?",
+        "answer": "If your package arrives damaged, please reach out to us with photos, and we’ll arrange a replacement or refund."
+      }
+    ]
+  }
+
+]
