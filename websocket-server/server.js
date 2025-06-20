@@ -3,7 +3,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const axios = require('axios');
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
@@ -22,12 +22,10 @@ console.log('Socket.IO server configured with CORS for:', ["http://localhost:300
 app.use(cors());
 app.use(express.json());
 
-const dbConfig = {
-  host: process.env.MYSQL_HOST || 'localhost',
-  user: process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQL_PASSWORD || '',
-  database: process.env.MYSQL_DATABASE || 'fredai_db'
-};
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/fredai_db',
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
 const emailTransporter = nodemailer.createTransport({
   service: 'gmail',
@@ -39,43 +37,34 @@ const emailTransporter = nodemailer.createTransport({
 
 async function initDatabase() {
   try {
-    const connection = await mysql.createConnection({
-      host: dbConfig.host,
-      user: dbConfig.user,
-      password: dbConfig.password
-    });
+    const client = await pool.connect();
 
-    await connection.execute(`CREATE DATABASE IF NOT EXISTS ${dbConfig.database}`);
-    await connection.end();
-
-    const db = await mysql.createConnection(dbConfig);
-
-    await db.execute(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS chat_sessions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         session_id VARCHAR(255) UNIQUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    await db.execute(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS messages (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         session_id VARCHAR(255),
-        message_type ENUM('user', 'bot', 'image') NOT NULL,
+        message_type VARCHAR(10) CHECK (message_type IN ('user', 'bot', 'image')) NOT NULL,
         content TEXT,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
       )
     `);
 
-    await db.execute(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS suggestions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         suggestion TEXT NOT NULL,
-        name VARCHAR(255) NULL,
-        email VARCHAR(255) NULL,
+        name VARCHAR(255),
+        email VARCHAR(255),
         is_anonymous BOOLEAN DEFAULT TRUE,
         want_response BOOLEAN DEFAULT FALSE,
         submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -83,17 +72,17 @@ async function initDatabase() {
       )
     `);
 
-    await db.execute(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS faq_categories (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         category_name VARCHAR(255) NOT NULL,
         display_order INT DEFAULT 0
       )
     `);
 
-    await db.execute(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS faq_items (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         category_id INT,
         question TEXT NOT NULL,
         answer TEXT NOT NULL,
@@ -103,7 +92,7 @@ async function initDatabase() {
     `);
 
     console.log('Database initialized successfully');
-    await db.end();
+    client.release();
   } catch (error) {
     console.error('Database initialization error:', error);
   }
@@ -111,19 +100,19 @@ async function initDatabase() {
 
 async function saveMessage(sessionId, messageType, content) {
   try {
-    const db = await mysql.createConnection(dbConfig);
+    const client = await pool.connect();
     
-    await db.execute(
-      'INSERT IGNORE INTO chat_sessions (session_id) VALUES (?)',
+    await client.query(
+      'INSERT INTO chat_sessions (session_id) VALUES ($1) ON CONFLICT (session_id) DO NOTHING',
       [sessionId]
     );
     
-    await db.execute(
-      'INSERT INTO messages (session_id, message_type, content) VALUES (?, ?, ?)',
+    await client.query(
+      'INSERT INTO messages (session_id, message_type, content) VALUES ($1, $2, $3)',
       [sessionId, messageType, content]
     );
     
-    await db.end();
+    client.release();
   } catch (error) {
     console.error('Error saving message:', error);
   }
@@ -131,10 +120,10 @@ async function saveMessage(sessionId, messageType, content) {
 
 async function saveSuggestion(suggestionData) {
   try {
-    const db = await mysql.createConnection(dbConfig);
+    const client = await pool.connect();
     
-    const [result] = await db.execute(
-      'INSERT INTO suggestions (suggestion, name, email, is_anonymous, want_response) VALUES (?, ?, ?, ?, ?)',
+    const result = await client.query(
+      'INSERT INTO suggestions (suggestion, name, email, is_anonymous, want_response) VALUES ($1, $2, $3, $4, $5) RETURNING id',
       [
         suggestionData.suggestion,
         suggestionData.name || null,
@@ -144,8 +133,8 @@ async function saveSuggestion(suggestionData) {
       ]
     );
     
-    await db.end();
-    return result.insertId;
+    client.release();
+    return result.rows[0].id;
   } catch (error) {
     console.error('Error saving suggestion:', error);
     throw error;
@@ -270,14 +259,16 @@ io.on('connection', (socket) => {
 
 app.get('/api/faq', async (req, res) => {
   try {
-    const db = await mysql.createConnection(dbConfig);
+    const client = await pool.connect();
     
-    const [categories] = await db.execute(`
+    const result = await client.query(`
       SELECT fc.id, fc.category_name, fi.question, fi.answer
       FROM faq_categories fc
       LEFT JOIN faq_items fi ON fc.id = fi.category_id
       ORDER BY fc.display_order, fi.display_order
     `);
+    
+    const categories = result.rows;
     
     const faqData = categories.reduce((acc, row) => {
       const existingCategory = acc.find(cat => cat.category === row.category_name);
@@ -302,7 +293,7 @@ app.get('/api/faq', async (req, res) => {
       return acc;
     }, []);
     
-    await db.end();
+    client.release();
     res.json(faqData);
   } catch (error) {
     console.error('Error fetching FAQ:', error);
@@ -339,12 +330,12 @@ app.post('/api/suggestions', async (req, res) => {
     const suggestionId = await saveSuggestion(suggestionData);
     await sendEmailSuggestion(suggestionData);
 
-    const db = await mysql.createConnection(dbConfig);
-    await db.execute(
-      'UPDATE suggestions SET email_sent = TRUE WHERE id = ?',
+    const client = await pool.connect();
+    await client.query(
+      'UPDATE suggestions SET email_sent = TRUE WHERE id = $1',
       [suggestionId]
     );
-    await db.end();
+    client.release();
 
     res.json({ 
       success: true, 

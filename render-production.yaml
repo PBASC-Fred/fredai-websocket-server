@@ -1,0 +1,81 @@
+services:
+  - type: web
+    name: fredai-frontend
+    env: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      - key: REACT_APP_WEBSOCKET_URL
+        value: https://fredai-websocket.onrender.com
+      - key: REACT_APP_API_URL
+        value: https://fredai-websocket.onrender.com
+
+  - type: web
+    name: fredai-websocket
+    env: node
+    buildCommand: cd websocket-server && npm install
+    startCommand: cd websocket-server && node server.js
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: MYSQL_HOST
+        fromDatabase:
+          name: fredai-mysql
+          property: host
+      - key: MYSQL_USER
+        fromDatabase:
+          name: fredai-mysql
+          property: user
+      - key: MYSQL_PASSWORD
+        fromDatabase:
+          name: fredai-mysql
+          property: password
+      - key: MYSQL_DATABASE
+        fromDatabase:
+          name: fredai-mysql
+          property: database
+      - key: RASA_SERVER_URL
+        value: https://fredai-rasa.onrender.com
+      - key: EMAIL_ADDRESS
+        value: jeffjackson@pbascorp.com
+      - key: EMAIL_PASSWORD
+        value: engr qdnu cown pdsh
+      - key: GEMINI_API_KEY
+        value: AIzaSyBJmhJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ
+      - key: IMAGE_API_KEY
+        value: sk-4Q4e68yR0hlTr2bPkzE650v2Nucz50UnfNA91p9k9TnxNH50
+
+  - type: web
+    name: fredai-rasa
+    env: python
+    buildCommand: cd backend && pip install -r requirements.txt && rasa train
+    startCommand: cd backend && rasa run --enable-api --cors "*" --port 10000
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: GEMINI_API_KEY
+        value: AIzaSyBJmhJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ
+      - key: IMAGE_API_KEY
+        value: sk-4Q4e68yR0hlTr2bPkzE650v2Nucz50UnfNA91p9k9TnxNH50
+
+  - type: web
+    name: fredai-rasa-actions
+    env: python
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && rasa run actions --port 10000
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: GEMINI_API_KEY
+        value: AIzaSyBJmhJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ
+      - key: IMAGE_API_KEY
+        value: sk-4Q4e68yR0hlTr2bPkzE650v2Nucz50UnfNA91p9k9TnxNH50
+      - key: EMAIL_ADDRESS
+        value: jeffjackson@pbascorp.com
+      - key: EMAIL_PASSWORD
+        value: engr qdnu cown pdsh
+
+databases:
+  - name: fredai-mysql
+    databaseName: fredai_db
+    user: fredai_user
