@@ -30,23 +30,3 @@ policies:
     max_history: 5
     epochs: 100
     constrain_similarities: true
-</config.yml>
-
-<create_file path="/home/ubuntu/fredai-new-project/backend/endpoints.yml">
-action_endpoint:
-  url: "http://localhost:5055/webhook"
-
-tracker_store:
-  type: SQL
-  dialect: "mysql+pymysql"
-  url: "mysql+pymysql://root:@localhost/fredai_db"
-  db: "fredai_db"
-  username: "root"
-  password: ""
-  query:
-    driver: mysql
-    host: localhost
-    port: 3306
-    db: fredai_db
-    username: root
-    password: ""
