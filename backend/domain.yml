@@ -1,0 +1,75 @@
+version: "3.1"
+
+intents:
+  - greet
+  - goodbye
+  - affirm
+  - deny
+  - mood_great
+  - mood_unhappy
+  - bot_challenge
+  - ask_financial_advice
+  - ask_investment
+  - ask_budget
+  - ask_savings
+  - request_image
+  - ask_faq
+  - submit_suggestion
+
+entities:
+  - investment_type
+  - budget_amount
+  - savings_goal
+  - image_prompt
+
+slots:
+  investment_type:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: investment_type
+  budget_amount:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: budget_amount
+  savings_goal:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: savings_goal
+  image_prompt:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: image_prompt
+
+responses:
+  utter_greet:
+  - text: "Hello! I'm your Financial AI Advisor. How can I help you with your financial questions today?"
+
+  utter_cheer_up:
+  - text: "Here is something to cheer you up:"
+    image: "https://i.imgur.com/nGF1K8f.jpg"
+
+  utter_did_that_help:
+  - text: "Did that help you?"
+
+  utter_happy:
+  - text: "Great, carry on!"
+
+  utter_goodbye:
+  - text: "Thank you for using FredAi.io! Have a great day and remember to make smart financial decisions!"
+
+  utter_iamabot:
+  - text: "I am FredAi.io, your AI-powered financial advisor. I can help you with investment advice, budgeting, savings strategies, and even generate images related to finance!"
+
+actions:
+  - action_financial_advice
+  - action_generate_image
+  - action_get_faq
+  - action_submit_suggestion
+
+session_config:
+  session_expiration_time: 60
+  carry_over_slots_to_new_session: true

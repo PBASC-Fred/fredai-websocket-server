@@ -1,0 +1,191 @@
+version: "3.1"
+
+nlu:
+- intent: greet
+  examples: |
+    - hey
+    - hello
+    - hi
+    - hello there
+    - good morning
+    - good evening
+    - moin
+    - hey there
+    - let's go
+    - hey dude
+    - goodmorning
+    - goodevening
+    - good afternoon
+
+- intent: goodbye
+  examples: |
+    - cu
+    - good by
+    - cee you later
+    - good night
+    - bye
+    - goodbye
+    - have a nice day
+    - see you around
+    - bye bye
+    - see you later
+    - thanks, bye
+    - thank you, goodbye
+
+- intent: affirm
+  examples: |
+    - yes
+    - y
+    - indeed
+    - of course
+    - that sounds good
+    - correct
+    - yes please
+    - absolutely
+    - sure
+    - right
+    - exactly
+
+- intent: deny
+  examples: |
+    - no
+    - n
+    - never
+    - I don't think so
+    - don't like that
+    - no way
+    - not really
+    - nope
+    - not interested
+    - no thanks
+
+- intent: mood_great
+  examples: |
+    - perfect
+    - great
+    - amazing
+    - feeling like a king
+    - wonderful
+    - I am feeling very good
+    - I am great
+    - I am amazing
+    - I am going to save the world
+    - super stoked
+    - extremely good
+    - so so perfect
+    - so good
+    - so perfect
+
+- intent: mood_unhappy
+  examples: |
+    - my day was horrible
+    - I am sad
+    - I don't feel very well
+    - I am disappointed
+    - super sad
+    - I'm so sad
+    - sad
+    - very sad
+    - unhappy
+    - not good
+    - not very good
+    - extremly sad
+    - so saad
+    - so sad
+
+- intent: bot_challenge
+  examples: |
+    - are you a bot?
+    - are you a human?
+    - am I talking to a bot?
+    - am I talking to a human?
+    - what are you?
+    - who are you?
+    - what is your name?
+    - tell me about yourself
+
+- intent: ask_financial_advice
+  examples: |
+    - I need financial advice
+    - can you help me with my finances?
+    - what should I do with my money?
+    - how can I improve my financial situation?
+    - I want to get better with money
+    - financial planning help
+    - money management advice
+    - personal finance tips
+    - how to manage money better
+    - financial guidance needed
+
+- intent: ask_investment
+  examples: |
+    - what should I invest in?
+    - investment advice
+    - where to invest money
+    - best investment options
+    - how to start investing
+    - investment strategies
+    - should I invest in [stocks](investment_type)?
+    - what about [bonds](investment_type)?
+    - [real estate](investment_type) investment
+    - [cryptocurrency](investment_type) advice
+    - portfolio diversification
+
+- intent: ask_budget
+  examples: |
+    - help me create a budget
+    - budgeting advice
+    - how to budget money
+    - I need a budget plan
+    - budget for [$1000](budget_amount)
+    - monthly budget help
+    - spending plan
+    - how to track expenses
+    - budget management
+    - financial planning budget
+
+- intent: ask_savings
+  examples: |
+    - how to save money
+    - savings advice
+    - best savings strategies
+    - I want to save [for retirement](savings_goal)
+    - saving [for a house](savings_goal)
+    - emergency fund advice
+    - how much should I save
+    - savings account recommendations
+    - building wealth through savings
+    - long term savings plan
+
+- intent: request_image
+  examples: |
+    - /imagine [financial chart](image_prompt)
+    - generate image of [investment portfolio](image_prompt)
+    - create picture of [money growth](image_prompt)
+    - /imagine [stock market](image_prompt)
+    - show me [budget visualization](image_prompt)
+    - generate [savings goal chart](image_prompt)
+    - /imagine [cryptocurrency](image_prompt)
+    - create [financial planning](image_prompt) image
+
+- intent: ask_faq
+  examples: |
+    - frequently asked questions
+    - faq
+    - common questions
+    - help section
+    - what questions do people ask
+    - show me faq
+    - frequently asked
+    - common queries
+
+- intent: submit_suggestion
+  examples: |
+    - I have a suggestion
+    - feedback
+    - I want to suggest something
+    - feature request
+    - improvement idea
+    - suggestion for the app
+    - can I make a suggestion
+    - I'd like to provide feedback

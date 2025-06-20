@@ -1,0 +1,48 @@
+version: "3.1"
+
+rules:
+
+- rule: Say goodbye anytime the user says goodbye
+  steps:
+  - intent: goodbye
+  - action: utter_goodbye
+
+- rule: Say 'I am a bot' anytime the user challenges
+  steps:
+  - intent: bot_challenge
+  - action: utter_iamabot
+
+- rule: Handle financial advice requests
+  steps:
+  - intent: ask_financial_advice
+  - action: action_financial_advice
+
+- rule: Handle investment questions
+  steps:
+  - intent: ask_investment
+  - action: action_financial_advice
+
+- rule: Handle budget questions
+  steps:
+  - intent: ask_budget
+  - action: action_financial_advice
+
+- rule: Handle savings questions
+  steps:
+  - intent: ask_savings
+  - action: action_financial_advice
+
+- rule: Handle image generation
+  steps:
+  - intent: request_image
+  - action: action_generate_image
+
+- rule: Handle FAQ requests
+  steps:
+  - intent: ask_faq
+  - action: action_get_faq
+
+- rule: Handle suggestions
+  steps:
+  - intent: submit_suggestion
+  - action: action_submit_suggestion

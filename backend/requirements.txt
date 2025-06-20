@@ -1,0 +1,7 @@
+rasa==3.6.0
+rasa-sdk==3.6.0
+requests==2.31.0
+python-dotenv==1.0.0
+secure-smtplib==0.1.1
+pymysql==1.1.0
+sqlalchemy==1.4.46
