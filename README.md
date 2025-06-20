@@ -148,4 +148,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Support
 
 For support and questions, please contact: professionalbusinessadvisory@gmail.com
-# Vercel Root Directory Fix Applied
+
+## Live Deployment
+- **Frontend**: https://fredai-pbasc-trustedadvisor-project-2025.vercel.app
+- **Status**: Professional URL updated from jeff-jacksons-projects branding
