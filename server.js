@@ -11,13 +11,23 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://localhost:3002"],
+    origin: [
+      "http://localhost:3000", 
+      "http://localhost:3002",
+      "https://gitlab-importer-nladay2f.devinapps.com",
+      "https://fredai-pbasc-trustedadvisor-project-2025-kfzj7qzsn.vercel.app"
+    ],
     methods: ["GET", "POST"],
     credentials: true
   }
 });
 
-console.log('Socket.IO server configured with CORS for:', ["http://localhost:3000", "http://localhost:3002"]);
+console.log('Socket.IO server configured with CORS for:', [
+  "http://localhost:3000", 
+  "http://localhost:3002",
+  "https://gitlab-importer-nladay2f.devinapps.com",
+  "https://fredai-pbasc-trustedadvisor-project-2025-kfzj7qzsn.vercel.app"
+]);
 
 app.use(cors());
 app.use(express.json());
@@ -350,7 +360,7 @@ app.post('/api/suggestions', async (req, res) => {
   }
 });
 
-const PORT = process.env.WEBSOCKET_PORT || 3001;
+const PORT = process.env.PORT || 3001;
 
 initDatabase().then(() => {
   server.listen(PORT, () => {
