@@ -125,18 +125,27 @@ async function tryMistral(message) {
   return text;
 }
 
-async function generateTrustedResponse(message) {
-  const providers = [
-    { name: 'Gemini', fn: tryGemini },
-    { name: 'OpenAI', fn: tryOpenAI },
-    { name: 'Claude', fn: tryClaude },
-    { name: 'Mistral', fn: tryMistral }
-  ];
+function isInEU() {
+  const locale = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  return /Europe\//.test(locale);
+}
 
-  for (const { name, fn } of providers) {
+const fallbackChain = isInEU()
+  ? ['Claude', 'Mistral', 'OpenAI', 'Gemini']
+  : ['Gemini', 'OpenAI', 'Claude', 'Mistral'];
+
+const providers = {
+  Gemini: tryGemini,
+  OpenAI: tryOpenAI,
+  Claude: tryClaude,
+  Mistral: tryMistral
+};
+
+async function generateTrustedResponse(message) {
+  for (const name of fallbackChain) {
     try {
       logStep(name, "Trying");
-      const result = await fn(message);
+      const result = await providers[name](message);
       logStep(name, "Success");
       return result;
     } catch (err) {
