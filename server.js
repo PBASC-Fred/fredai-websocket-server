@@ -5,11 +5,18 @@ const cors = require('cors');
 const axios = require('axios');
 const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
-const { Configuration, OpenAIApi } = require('openai');
 require('dotenv').config();
+
+const { generateTrustedResponse } = require('./utils/aiService');
 
 const app = express();
 const server = http.createServer(app);
+
+['GEMINI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'MISTRAL_API_KEY'].forEach(key => {
+  if (!process.env[key]) {
+    console.warn(`⚠️  Missing env variable: ${key}`);
+  }
+});
 
 const allowedOrigins = [
   "http://localhost:3000", 
@@ -190,74 +197,9 @@ async function sendEmailSuggestion(suggestionData) {
 
 console.log('WebSocket server initialized, waiting for connections...');
 
-async function generateGeminiResponse(message) {
-  console.log("Using Gemini API key:", process.env.GEMINI_API_KEY?.slice(0, 6));
-  
-  try {
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        contents: [{
-          parts: [{
-            text: `You are FredAi, a trusted AI advisor specializing in taxes, budgeting, savings, and financial planning. Please provide helpful, accurate financial advice. User question: ${message}`
-          }]
-        }]
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        timeout: 15000
-      }
-    );
 
-    console.log("Gemini response received:", response.data);
 
-    if (response.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      return response.data.candidates[0].content.parts[0].text;
-    } else {
-      return "I'm sorry, I couldn't generate a response. Please try again.";
-    }
-  } catch (error) {
-    console.error('Gemini API error:', {
-      message: error.message,
-      response: error.response?.data,
-      status: error.response?.status,
-      stack: error.stack
-    });
 
-    if ([401, 403, 404, 429].includes(error.response?.status)) {
-      console.warn('Falling back to OpenAI due to Gemini error...');
-      return await generateOpenAIFallback(message);
-    }
-
-    return "I'm experiencing technical difficulties. Please try again later.";
-  }
-}
-
-async function generateOpenAIFallback(message) {
-  try {
-    const configuration = new Configuration({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-    const openai = new OpenAIApi(configuration);
-
-    const prompt = `You are FredAi, a trusted AI advisor specializing in taxes, budgeting, savings, and financial planning. Please provide helpful, accurate financial advice. User question: ${message}`;
-
-    const completion = await openai.createChatCompletion({
-      model: "gpt-4",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.7,
-    });
-
-    const responseText = completion.data.choices[0].message.content;
-    console.log('OpenAI fallback response:', responseText);
-    return responseText;
-  } catch (error) {
-    console.error('OpenAI fallback failed:', error);
-    return "Sorry, all AI services are currently unavailable. Please try again later.";
-  }
-}
 
 async function generateStabilityImage(prompt) {
   try {
@@ -339,7 +281,7 @@ wss.on('connection', (ws, req) => {
             }
           }
         } else {
-          const botResponse = await generateGeminiResponse(userMessage);
+          const botResponse = await generateTrustedResponse(userMessage);
           await saveMessage(sessionId, 'bot', botResponse);
           
           if (ws.readyState === WebSocket.OPEN) {
@@ -466,6 +408,22 @@ app.post('/api/suggestions', async (req, res) => {
       success: false, 
       message: 'Failed to send the suggestion. Please try again.' 
     });
+  }
+});
+
+app.post('/api/debug-ai', async (req, res) => {
+  const { message } = req.body;
+
+  if (!message || typeof message !== 'string') {
+    return res.status(400).json({ error: 'Missing `message` in request body.' });
+  }
+
+  try {
+    const response = await generateTrustedResponse(message);
+    res.json({ success: true, response });
+  } catch (error) {
+    console.error('AI debug error:', error);
+    res.status(500).json({ success: false, error: 'AI service error.' });
   }
 });
 
