@@ -190,6 +190,8 @@ async function sendEmailSuggestion(suggestionData) {
 console.log('WebSocket server initialized, waiting for connections...');
 
 async function generateGeminiResponse(message) {
+  console.log("Using Gemini API key:", process.env.GEMINI_API_KEY?.slice(0, 10));
+  
   try {
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -203,9 +205,12 @@ async function generateGeminiResponse(message) {
       {
         headers: {
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 15000
       }
     );
+
+    console.log("Gemini response received:", response.data);
 
     if (response.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
       return response.data.candidates[0].content.parts[0].text;
@@ -213,7 +218,21 @@ async function generateGeminiResponse(message) {
       return "I'm sorry, I couldn't generate a response. Please try again.";
     }
   } catch (error) {
-    console.error('Error calling Gemini API:', error);
+    console.error('Gemini API error:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      stack: error.stack
+    });
+
+    if (error.response?.status === 403 || error.response?.status === 401) {
+      return "Authentication failed. Please check the Gemini API key.";
+    }
+
+    if (error.response?.status === 429) {
+      return "Too many requests. Please try again in a moment.";
+    }
+
     return "I'm experiencing technical difficulties. Please try again later.";
   }
 }
@@ -277,36 +296,52 @@ wss.on('connection', (ws, req) => {
           
           if (imageUrl) {
             await saveMessage(sessionId, 'image', imageUrl);
-            ws.send(JSON.stringify({
-              type: 'image',
-              content: imageUrl,
-              timestamp: new Date().toISOString()
-            }));
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'image',
+                content: imageUrl,
+                timestamp: new Date().toISOString()
+              }));
+            } else {
+              console.warn('Client disconnected before image response could be sent.');
+            }
           } else {
-            ws.send(JSON.stringify({
-              type: 'bot',
-              content: 'Sorry, I encountered an error generating the image. Please try again.',
-              timestamp: new Date().toISOString()
-            }));
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'bot',
+                content: 'Sorry, I encountered an error generating the image. Please try again.',
+                timestamp: new Date().toISOString()
+              }));
+            } else {
+              console.warn('Client disconnected before error response could be sent.');
+            }
           }
         } else {
           const botResponse = await generateGeminiResponse(userMessage);
           await saveMessage(sessionId, 'bot', botResponse);
           
-          ws.send(JSON.stringify({
-            type: 'bot',
-            content: botResponse,
-            timestamp: new Date().toISOString()
-          }));
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'bot',
+              content: botResponse,
+              timestamp: new Date().toISOString()
+            }));
+          } else {
+            console.warn('Client disconnected before response could be sent.');
+          }
         }
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      ws.send(JSON.stringify({
-        type: 'bot',
-        content: 'Sorry, I encountered an error processing your message.',
-        timestamp: new Date().toISOString()
-      }));
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'bot',
+          content: 'Sorry, I encountered an error processing your message.',
+          timestamp: new Date().toISOString()
+        }));
+      } else {
+        console.warn('Client disconnected before error response could be sent.');
+      }
     }
   });
 
