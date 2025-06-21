@@ -5,6 +5,7 @@ const cors = require('cors');
 const axios = require('axios');
 const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
+const { Configuration, OpenAIApi } = require('openai');
 require('dotenv').config();
 
 const app = express();
@@ -225,19 +226,36 @@ async function generateGeminiResponse(message) {
       stack: error.stack
     });
 
-    if (error.response?.status === 403 || error.response?.status === 401) {
-      return "Authentication failed. Please check the Gemini API key.";
-    }
-
-    if (error.response?.status === 429) {
-      return "Too many requests. Please try again in a moment.";
-    }
-
-    if (error.response?.status === 404) {
-      return "API endpoint not found. Please check the model configuration.";
+    if ([401, 403, 404, 429].includes(error.response?.status)) {
+      console.warn('Falling back to OpenAI due to Gemini error...');
+      return await generateOpenAIFallback(message);
     }
 
     return "I'm experiencing technical difficulties. Please try again later.";
+  }
+}
+
+async function generateOpenAIFallback(message) {
+  try {
+    const configuration = new Configuration({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+    const openai = new OpenAIApi(configuration);
+
+    const prompt = `You are FredAi, a trusted AI advisor specializing in taxes, budgeting, savings, and financial planning. Please provide helpful, accurate financial advice. User question: ${message}`;
+
+    const completion = await openai.createChatCompletion({
+      model: "gpt-4",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+    });
+
+    const responseText = completion.data.choices[0].message.content;
+    console.log('OpenAI fallback response:', responseText);
+    return responseText;
+  } catch (error) {
+    console.error('OpenAI fallback failed:', error);
+    return "Sorry, all AI services are currently unavailable. Please try again later.";
   }
 }
 
