@@ -190,11 +190,11 @@ async function sendEmailSuggestion(suggestionData) {
 console.log('WebSocket server initialized, waiting for connections...');
 
 async function generateGeminiResponse(message) {
-  console.log("Using Gemini API key:", process.env.GEMINI_API_KEY?.slice(0, 10));
+  console.log("Using Gemini API key:", process.env.GEMINI_API_KEY?.slice(0, 6));
   
   try {
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         contents: [{
           parts: [{
@@ -231,6 +231,10 @@ async function generateGeminiResponse(message) {
 
     if (error.response?.status === 429) {
       return "Too many requests. Please try again in a moment.";
+    }
+
+    if (error.response?.status === 404) {
+      return "API endpoint not found. Please check the model configuration.";
     }
 
     return "I'm experiencing technical difficulties. Please try again later.";
