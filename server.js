@@ -15,8 +15,10 @@ const allowedOrigins = [
   "http://localhost:3000", 
   "http://localhost:3002",
   "https://gitlab-importer-nladay2f.devinapps.com",
-  "https://fredai-pbasc-trustedadvisor-project-2025-kfzj7qzsn.vercel.app"
+  "https://fredai-pbasc-trustedadvisor-project-2025-kfzj7qzsn.vercel.app",
+  "fredai-drab.vercel.app" // <--- your Vercel frontend!
 ];
+
 
 const wss = new WebSocket.Server({ 
   server,
