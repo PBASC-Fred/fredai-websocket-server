@@ -3,7 +3,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const axios = require('axios');
-const { Pool } = require('pg');
+const { Pool } = require('pg'); // Only once!
 const nodemailer = require('nodemailer');
 const multer = require('multer');
 require('dotenv').config();
@@ -47,8 +47,8 @@ const upload = multer({
 });
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/fredai_db',
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
 });
 
 const emailTransporter = nodemailer.createTransport({
