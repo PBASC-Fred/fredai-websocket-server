@@ -117,7 +117,22 @@ async function callStability(prompt) {
         }
       }
     );
-    return response.data?.image || "[Stability] No image returned.";
+
+    // Try both possible return shapes
+    if (response.data && response.data.image) {
+      // If image is base64, create a data URI
+      if (/^[A-Za-z0-9+/=]+$/.test(response.data.image.trim())) {
+        return `data:image/png;base64,${response.data.image}`;
+      }
+      // If image is a URL
+      if (response.data.image.startsWith("http")) {
+        return response.data.image;
+      }
+    }
+    if (response.data && response.data.url) {
+      return response.data.url;
+    }
+    return "[Stability] No image returned.";
   } catch (err) {
     console.error("Stability error:", err?.response?.data || err.message);
     return "[Stability] Error generating image.";
