@@ -76,6 +76,13 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
 });
 
+// ---- Dummy saveMessage function (prevents crashes, logs to console) ----
+async function saveMessage(sessionId, role, message) {
+  // TODO: Replace this with your real DB save if needed
+  console.log(`[saveMessage] [${sessionId}] ${role}: ${message}`);
+}
+});
+
 // ---- WebSocket Chat Handler ----
 wss.on('connection', (ws, req) => {
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
