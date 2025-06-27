@@ -29,11 +29,10 @@ const allowedOrigins = [
   "http://localhost:3002",
   "https://gitlab-importer-nladay2f.devinapps.com",
   "https://fredai-pbasc-trustedadvisor-project-2025-kfzj7qzsn.vercel.app",
-  "https://fredai-drab.vercel.app"
+  "https://fredai-drab.vercel.app",
   "https://fredai-pbasc-trustedadvisor-git-63d81c-pbasc-trustadvisor-chat.vercel.app"
-  "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app"
-  "https://fredai-pbasc-trustedadvisor-project.vercel.app"
 ];
+
 
 
 // WebSocket server with strict origin check & debugging log
