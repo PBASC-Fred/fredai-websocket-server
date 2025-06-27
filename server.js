@@ -1,29 +1,17 @@
-// server.js
+// server.js - Full AI/Multi-Provider Production Version
+
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const axios = require('axios');
 const { Pool } = require('pg');
-const nodemailer = require('nodemailer');
 const multer = require('multer');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
 
-// Environment printout for debugging
-console.log('--- ENV CHECK ---');
-console.log('GEMINI_API_KEY:', !!process.env.GEMINI_API_KEY);
-console.log('OPENAI_API_KEY:', !!process.env.OPENAI_API_KEY);
-console.log('STABILITY_API_KEY:', !!process.env.STABILITY_API_KEY);
-console.log('DATABASE_URL:', !!process.env.DATABASE_URL);
-console.log('EMAIL_ADDRESS:', !!process.env.EMAIL_ADDRESS);
-console.log('EMAIL_PASSWORD:', !!process.env.EMAIL_PASSWORD);
-console.log('NODE_ENV:', process.env.NODE_ENV);
-console.log('-----------------');
-
-// List ALL allowed origins for WebSocket clients
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3002",
@@ -35,23 +23,173 @@ const allowedOrigins = [
   "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app"
 ];
 
-// WebSocket server with strict origin check & debugging log
-const wss = new WebSocket.Server({
-  server,
-  verifyClient: (info) => {
-    const origin = info.origin;
-    const allowed = allowedOrigins.includes(origin) || !origin;
-    console.log('[WS] Incoming connection from:', origin, '-> allowed:', allowed);
-    return allowed;
-  }
-});
+// ---- AI Provider Callers ----
 
-console.log('WebSocket server configured with CORS for:', allowedOrigins);
+// Gemini (Google)
+async function callGemini(prompt) {
+  try {
+    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + process.env.GEMINI_API_KEY;
+    const response = await axios.post(url, {
+      contents: [{ parts: [{ text: prompt }] }]
+    });
+    return response.data.candidates?.[0]?.content?.parts?.[0]?.text || "[Gemini] No response.";
+  } catch (err) {
+    console.error("Gemini error:", err?.response?.data || err.message);
+    return "[Gemini] Error processing your message.";
+  }
+}
+
+// OpenAI (ChatGPT/GPT-4)
+async function callOpenAI(prompt) {
+  try {
+    const response = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }
+      }
+    );
+    return response.data.choices?.[0]?.message?.content || "[OpenAI] No response.";
+  } catch (err) {
+    console.error("OpenAI error:", err?.response?.data || err.message);
+    return "[OpenAI] Error processing your message.";
+  }
+}
+
+// Anthropic (Claude)
+async function callAnthropic(prompt) {
+  try {
+    const response = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      {
+        model: "claude-3-opus-20240229", // Use your preferred Claude version
+        max_tokens: 2048,
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json"
+        }
+      }
+    );
+    return response.data?.content?.[0]?.text || "[Anthropic] No response.";
+  } catch (err) {
+    console.error("Anthropic error:", err?.response?.data || err.message);
+    return "[Anthropic] Error processing your message.";
+  }
+}
+
+// Mistral
+async function callMistral(prompt) {
+  try {
+    const response = await axios.post(
+      "https://api.mistral.ai/v1/chat/completions",
+      {
+        model: "mistral-large-latest",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          "Authorization": `Bearer ${process.env.MISTRAL_API_KEY}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    return response.data.choices?.[0]?.message?.content || "[Mistral] No response.";
+  } catch (err) {
+    console.error("Mistral error:", err?.response?.data || err.message);
+    return "[Mistral] Error processing your message.";
+  }
+}
+
+// Stability AI for image generation
+async function callStability(prompt) {
+  try {
+    const response = await axios.post(
+      "https://api.stability.ai/v2beta/stable-image/generate/core",
+      {
+        prompt,
+        output_format: "png",
+        aspect_ratio: "1:1"
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.STABILITY_API_KEY}`,
+          Accept: "application/json"
+        }
+      }
+    );
+    return response.data?.image || "[Stability] No image returned.";
+  } catch (err) {
+    console.error("Stability error:", err?.response?.data || err.message);
+    return "[Stability] Error generating image.";
+  }
+}
+
+// ---- Document Analysis using OpenAI (GPT-4o) ----
+async function analyzeDocument(text) {
+  try {
+    const response = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: "You are an expert in document analysis. Summarize or extract key information as requested."
+          },
+          {
+            role: "user",
+            content: text
+          }
+        ]
+      },
+      {
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }
+      }
+    );
+    return response.data.choices?.[0]?.message?.content || "[OpenAI] No analysis returned.";
+  } catch (err) {
+    console.error("OpenAI Doc Analysis error:", err?.response?.data || err.message);
+    return "[OpenAI] Error analyzing document.";
+  }
+}
+
+// ---- WebSocket Routing Logic ----
+
+function pickProvider() {
+  // Example round-robin/cycle, or select by env/config/user preference
+  // Here: default to OpenAI, you can swap in any logic you like
+  return process.env.DEFAULT_PROVIDER || "openai";
+}
+
+async function aiHandlerSafe(userMessage, type = "chat") {
+  let provider = pickProvider();
+  // type === "image" => Stability
+  if (type === "image") {
+    return await callStability(userMessage);
+  }
+  if (type === "doc") {
+    return await analyzeDocument(userMessage);
+  }
+  // type === "chat"
+  if (provider === "gemini") return await callGemini(userMessage);
+  if (provider === "anthropic") return await callAnthropic(userMessage);
+  if (provider === "mistral") return await callMistral(userMessage);
+  // default to OpenAI
+  return await callOpenAI(userMessage);
+}
+
+// ---- Express Middleware ----
 
 app.use(cors());
 app.use(express.json());
 
-// Health check endpoint for Railway/Vercel/GitHub bots
 app.get('/', (req, res) => {
   res.status(200).send('FredAI WebSocket server is running.');
 });
@@ -74,25 +212,27 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
 });
 
-// ---- Dummy saveMessage function (replace with DB logic if needed) ----
+// ---- Dummy saveMessage (replace with DB code) ----
 async function saveMessage(sessionId, role, message) {
-  // TODO: Replace this with your real DB save if needed
+  // Implement database save here if needed.
   console.log(`[saveMessage] [${sessionId}] ${role}: ${message}`);
 }
 
-// ---- Dummy generateGeminiResponse function (replace with your AI logic!) ----
-async function generateGeminiResponse(userMessage) {
-  // TODO: Replace this with your actual Gemini/OpenAI/Mistral call.
-  // For now, just echo the user's message back.
-  return `You said: "${userMessage}"`;
-}
+// ---- WebSocket Server ----
 
-// ---- WebSocket Chat Handler ----
+const wss = new WebSocket.Server({
+  server,
+  verifyClient: (info) => {
+    const origin = info.origin;
+    const allowed = allowedOrigins.includes(origin) || !origin;
+    console.log('[WS] Incoming connection from:', origin, '-> allowed:', allowed);
+    return allowed;
+  }
+});
+
 wss.on('connection', (ws, req) => {
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   console.log('[WS] New client connected:', sessionId);
-  console.log('[WS] Total clients:', wss.clients.size);
-
   ws.send(JSON.stringify({
     type: 'welcome',
     content: "Welcome! I'm your Trusted AI Advisor.",
@@ -100,13 +240,10 @@ wss.on('connection', (ws, req) => {
   }));
 
   ws.on('message', async (data) => {
-    console.log('[WS] Message received:', data);
-
     let message;
     try {
       message = JSON.parse(data.toString());
     } catch (err) {
-      console.error('[WS] Invalid JSON:', err, data);
       ws.send(JSON.stringify({
         type: 'bot',
         content: 'Internal error: invalid message format.',
@@ -114,36 +251,39 @@ wss.on('connection', (ws, req) => {
       }));
       return;
     }
-
-    if (message.type === 'chat') {
-      try {
-        const userMessage = message.message;
-        await saveMessage(sessionId, 'user', userMessage);
-
-        // Replace with your actual AI provider logic as needed
-        const aiResponse = await generateGeminiResponse(userMessage);
-        console.log('[WS] AI Response:', aiResponse);
-
-        await saveMessage(sessionId, 'bot', aiResponse);
-
+    try {
+      // Detect image/document requests (by type or message)
+      let type = message.type || "chat";
+      let userMessage = message.message || "";
+      if (type === "image") {
+        const img = await aiHandlerSafe(userMessage, "image");
         ws.send(JSON.stringify({
-          type: 'bot',
-          content: aiResponse,
+          type: "image",
+          content: img,
           timestamp: new Date().toISOString()
         }));
-        console.log('[WS] Sent bot response');
-      } catch (err) {
-        console.error('[WS] Error in chat handling:', err);
+      } else if (type === "doc") {
+        const analysis = await aiHandlerSafe(userMessage, "doc");
+        ws.send(JSON.stringify({
+          type: "bot",
+          content: analysis,
+          timestamp: new Date().toISOString()
+        }));
+      } else { // normal chat
+        await saveMessage(sessionId, 'user', userMessage);
+        const botResponse = await aiHandlerSafe(userMessage, "chat");
+        await saveMessage(sessionId, 'bot', botResponse);
         ws.send(JSON.stringify({
           type: 'bot',
-          content: 'Sorry, an error occurred processing your message.',
+          content: botResponse,
           timestamp: new Date().toISOString()
         }));
       }
-    } else {
+    } catch (err) {
+      console.error('[WS] Error in chat handling:', err);
       ws.send(JSON.stringify({
         type: 'bot',
-        content: 'Unknown message type.',
+        content: "Sorry, an error occurred processing your message.",
         timestamp: new Date().toISOString()
       }));
     }
@@ -159,7 +299,27 @@ wss.on('connection', (ws, req) => {
 });
 
 // ---- HTTP routes as before ----
-// ... (your app.get('/api/faq'), app.post('/api/suggestions'), etc.)
+// Example: document upload endpoint
+app.post('/api/document', upload.single('file'), async (req, res) => {
+  try {
+    let fileText = "";
+    if (req.file.mimetype === "application/pdf") {
+      const pdfParse = require('pdf-parse');
+      const data = await pdfParse(req.file.buffer);
+      fileText = data.text;
+    } else if (req.file.mimetype === "image/png" || req.file.mimetype === "image/jpeg") {
+      const Tesseract = require('tesseract.js');
+      const result = await Tesseract.recognize(req.file.buffer, 'eng');
+      fileText = result.data.text;
+    }
+    // Analyze with OpenAI
+    const analysis = await analyzeDocument(fileText);
+    res.json({ analysis });
+  } catch (err) {
+    console.error('Doc upload error:', err);
+    res.status(500).json({ error: "Failed to analyze document." });
+  }
+});
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
