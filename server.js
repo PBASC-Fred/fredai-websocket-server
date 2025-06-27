@@ -35,8 +35,6 @@ const allowedOrigins = [
   "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app"
 ];
 
-
-
 // WebSocket server with strict origin check & debugging log
 const wss = new WebSocket.Server({
   server,
@@ -76,12 +74,18 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
 });
 
-// ---- Dummy saveMessage function (prevents crashes, logs to console) ----
+// ---- Dummy saveMessage function (replace with DB logic if needed) ----
 async function saveMessage(sessionId, role, message) {
   // TODO: Replace this with your real DB save if needed
   console.log(`[saveMessage] [${sessionId}] ${role}: ${message}`);
 }
-});
+
+// ---- Dummy generateGeminiResponse function (replace with your AI logic!) ----
+async function generateGeminiResponse(userMessage) {
+  // TODO: Replace this with your actual Gemini/OpenAI/Mistral call.
+  // For now, just echo the user's message back.
+  return `You said: "${userMessage}"`;
+}
 
 // ---- WebSocket Chat Handler ----
 wss.on('connection', (ws, req) => {
