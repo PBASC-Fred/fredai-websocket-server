@@ -1,4 +1,4 @@
-// server.js - Full AI/Multi-Provider Production Version
+// server.js - Multi-Provider, Fallback, All AI, Ready to Deploy
 
 const express = require('express');
 const http = require('http');
@@ -12,6 +12,7 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 
+// ----- Allowed Origins -----
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3002",
@@ -23,15 +24,12 @@ const allowedOrigins = [
   "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app"
 ];
 
-// ---- AI Provider Callers ----
+// ----- Provider Callers -----
 
-// Gemini (Google)
 async function callGemini(prompt) {
   try {
     const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + process.env.GEMINI_API_KEY;
-    const response = await axios.post(url, {
-      contents: [{ parts: [{ text: prompt }] }]
-    });
+    const response = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
     return response.data.candidates?.[0]?.content?.parts?.[0]?.text || "[Gemini] No response.";
   } catch (err) {
     console.error("Gemini error:", err?.response?.data || err.message);
@@ -39,7 +37,6 @@ async function callGemini(prompt) {
   }
 }
 
-// OpenAI (ChatGPT/GPT-4)
 async function callOpenAI(prompt) {
   try {
     const response = await axios.post(
@@ -59,13 +56,12 @@ async function callOpenAI(prompt) {
   }
 }
 
-// Anthropic (Claude)
 async function callAnthropic(prompt) {
   try {
     const response = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model: "claude-3-opus-20240229", // Use your preferred Claude version
+        model: "claude-3-opus-20240229",
         max_tokens: 2048,
         messages: [{ role: "user", content: prompt }]
       },
@@ -84,7 +80,6 @@ async function callAnthropic(prompt) {
   }
 }
 
-// Mistral
 async function callMistral(prompt) {
   try {
     const response = await axios.post(
@@ -107,7 +102,6 @@ async function callMistral(prompt) {
   }
 }
 
-// Stability AI for image generation
 async function callStability(prompt) {
   try {
     const response = await axios.post(
@@ -131,7 +125,6 @@ async function callStability(prompt) {
   }
 }
 
-// ---- Document Analysis using OpenAI (GPT-4o) ----
 async function analyzeDocument(text) {
   try {
     const response = await axios.post(
@@ -160,33 +153,35 @@ async function analyzeDocument(text) {
   }
 }
 
-// ---- WebSocket Routing Logic ----
-
-function pickProvider() {
-  // Example round-robin/cycle, or select by env/config/user preference
-  // Here: default to OpenAI, you can swap in any logic you like
-  return process.env.DEFAULT_PROVIDER || "openai";
+// ----- Fallback Chat Handler -----
+async function fallbackAIChat(userMessage) {
+  const providers = [
+    { name: "Gemini",    fn: callGemini,    key: process.env.GEMINI_API_KEY },
+    { name: "OpenAI",    fn: callOpenAI,    key: process.env.OPENAI_API_KEY },
+    { name: "Anthropic", fn: callAnthropic, key: process.env.ANTHROPIC_API_KEY },
+    { name: "Mistral",   fn: callMistral,   key: process.env.MISTRAL_API_KEY }
+  ];
+  for (const provider of providers) {
+    if (!provider.key) continue;
+    try {
+      const reply = await provider.fn(userMessage);
+      if (
+        reply &&
+        !reply.startsWith(`[${provider.name}] Error`) &&
+        !reply.startsWith(`[${provider.name}] No response`)
+      ) {
+        return `[${provider.name}] ${reply}`;
+      }
+      // else: log and try next
+      console.warn(`Provider ${provider.name} failed, trying next...`);
+    } catch (err) {
+      console.warn(`Provider ${provider.name} threw error:`, err.message);
+    }
+  }
+  return "Sorry, all AI providers failed to respond. Please try again later.";
 }
 
-async function aiHandlerSafe(userMessage, type = "chat") {
-  let provider = pickProvider();
-  // type === "image" => Stability
-  if (type === "image") {
-    return await callStability(userMessage);
-  }
-  if (type === "doc") {
-    return await analyzeDocument(userMessage);
-  }
-  // type === "chat"
-  if (provider === "gemini") return await callGemini(userMessage);
-  if (provider === "anthropic") return await callAnthropic(userMessage);
-  if (provider === "mistral") return await callMistral(userMessage);
-  // default to OpenAI
-  return await callOpenAI(userMessage);
-}
-
-// ---- Express Middleware ----
-
+// ----- Express and Middleware -----
 app.use(cors());
 app.use(express.json());
 
@@ -212,14 +207,12 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
 });
 
-// ---- Dummy saveMessage (replace with DB code) ----
 async function saveMessage(sessionId, role, message) {
   // Implement database save here if needed.
   console.log(`[saveMessage] [${sessionId}] ${role}: ${message}`);
 }
 
-// ---- WebSocket Server ----
-
+// ----- WebSocket Server -----
 const wss = new WebSocket.Server({
   server,
   verifyClient: (info) => {
@@ -233,6 +226,7 @@ const wss = new WebSocket.Server({
 wss.on('connection', (ws, req) => {
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   console.log('[WS] New client connected:', sessionId);
+
   ws.send(JSON.stringify({
     type: 'welcome',
     content: "Welcome! I'm your Trusted AI Advisor.",
@@ -252,26 +246,25 @@ wss.on('connection', (ws, req) => {
       return;
     }
     try {
-      // Detect image/document requests (by type or message)
       let type = message.type || "chat";
       let userMessage = message.message || "";
       if (type === "image") {
-        const img = await aiHandlerSafe(userMessage, "image");
+        const img = await callStability(userMessage);
         ws.send(JSON.stringify({
           type: "image",
           content: img,
           timestamp: new Date().toISOString()
         }));
       } else if (type === "doc") {
-        const analysis = await aiHandlerSafe(userMessage, "doc");
+        const analysis = await analyzeDocument(userMessage);
         ws.send(JSON.stringify({
           type: "bot",
           content: analysis,
           timestamp: new Date().toISOString()
         }));
-      } else { // normal chat
+      } else { // fallback chat!
         await saveMessage(sessionId, 'user', userMessage);
-        const botResponse = await aiHandlerSafe(userMessage, "chat");
+        const botResponse = await fallbackAIChat(userMessage);
         await saveMessage(sessionId, 'bot', botResponse);
         ws.send(JSON.stringify({
           type: 'bot',
@@ -298,8 +291,7 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// ---- HTTP routes as before ----
-// Example: document upload endpoint
+// ----- Document Upload HTTP endpoint -----
 app.post('/api/document', upload.single('file'), async (req, res) => {
   try {
     let fileText = "";
@@ -312,7 +304,6 @@ app.post('/api/document', upload.single('file'), async (req, res) => {
       const result = await Tesseract.recognize(req.file.buffer, 'eng');
       fileText = result.data.text;
     }
-    // Analyze with OpenAI
     const analysis = await analyzeDocument(fileText);
     res.json({ analysis });
   } catch (err) {
