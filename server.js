@@ -12,7 +12,7 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 
-// Print environment check at startup
+// Environment printout for debugging
 console.log('--- ENV CHECK ---');
 console.log('GEMINI_API_KEY:', !!process.env.GEMINI_API_KEY);
 console.log('OPENAI_API_KEY:', !!process.env.OPENAI_API_KEY);
@@ -20,8 +20,10 @@ console.log('STABILITY_API_KEY:', !!process.env.STABILITY_API_KEY);
 console.log('DATABASE_URL:', !!process.env.DATABASE_URL);
 console.log('EMAIL_ADDRESS:', !!process.env.EMAIL_ADDRESS);
 console.log('EMAIL_PASSWORD:', !!process.env.EMAIL_PASSWORD);
+console.log('NODE_ENV:', process.env.NODE_ENV);
 console.log('-----------------');
 
+// List ALL allowed origins for WebSocket clients
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3002",
@@ -30,11 +32,14 @@ const allowedOrigins = [
   "https://fredai-drab.vercel.app"
 ];
 
+// WebSocket server with strict origin check & debugging log
 const wss = new WebSocket.Server({
   server,
   verifyClient: (info) => {
     const origin = info.origin;
-    return allowedOrigins.includes(origin) || !origin;
+    const allowed = allowedOrigins.includes(origin) || !origin;
+    console.log('[WS] Incoming connection from:', origin, '-> allowed:', allowed);
+    return allowed;
   }
 });
 
@@ -42,6 +47,11 @@ console.log('WebSocket server configured with CORS for:', allowedOrigins);
 
 app.use(cors());
 app.use(express.json());
+
+// Health check endpoint for Railway/Vercel/GitHub bots
+app.get('/', (req, res) => {
+  res.send('FredAI WebSocket server is running.');
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -61,9 +71,7 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
 });
 
-// ... [emailTransporter, initDatabase, saveMessage, saveSuggestion, sendEmailSuggestion as before] ...
-
-// ---- WebSocket Handler with Debugging ----
+// ---- WebSocket Chat Handler ----
 wss.on('connection', (ws, req) => {
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   console.log('[WS] New client connected:', sessionId);
@@ -96,7 +104,7 @@ wss.on('connection', (ws, req) => {
         const userMessage = message.message;
         await saveMessage(sessionId, 'user', userMessage);
 
-        // Example AI provider call (replace as needed)
+        // Replace with your actual AI provider logic as needed
         const aiResponse = await generateGeminiResponse(userMessage);
         console.log('[WS] AI Response:', aiResponse);
 
