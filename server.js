@@ -31,6 +31,8 @@ const allowedOrigins = [
   "https://fredai-pbasc-trustedadvisor-project-2025-kfzj7qzsn.vercel.app",
   "https://fredai-drab.vercel.app",
   "https://fredai-pbasc-trustedadvisor-git-63d81c-pbasc-trustadvisor-chat.vercel.app"
+  "https://fredai-pbasc-trustedadvisor-project.vercel.app"
+  "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app"
 ];
 
 
@@ -53,7 +55,7 @@ app.use(express.json());
 
 // Health check endpoint for Railway/Vercel/GitHub bots
 app.get('/', (req, res) => {
-  res.send('FredAI WebSocket server is running.');
+  res.status(200).send('FredAI WebSocket server is running.');
 });
 
 const upload = multer({
