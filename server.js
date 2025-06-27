@@ -1,4 +1,4 @@
-// server.js - Multi-Provider, Fallback, All AI, Ready to Deploy
+// server.js - Multi-provider AI, user never sees [AI Provider] in chat
 
 const express = require('express');
 const http = require('http');
@@ -12,7 +12,6 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 
-// ----- Allowed Origins -----
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3002",
@@ -153,7 +152,7 @@ async function analyzeDocument(text) {
   }
 }
 
-// ----- Fallback Chat Handler -----
+// ----- Fallback Chat Handler (no provider label in user reply) -----
 async function fallbackAIChat(userMessage) {
   const providers = [
     { name: "Gemini",    fn: callGemini,    key: process.env.GEMINI_API_KEY },
@@ -170,9 +169,11 @@ async function fallbackAIChat(userMessage) {
         !reply.startsWith(`[${provider.name}] Error`) &&
         !reply.startsWith(`[${provider.name}] No response`)
       ) {
-        return `[${provider.name}] ${reply}`;
+        // Log for your admin/debugging
+        console.log(`[AI reply] via ${provider.name}: ${reply}`);
+        // Return just the AI reply, no provider label
+        return reply;
       }
-      // else: log and try next
       console.warn(`Provider ${provider.name} failed, trying next...`);
     } catch (err) {
       console.warn(`Provider ${provider.name} threw error:`, err.message);
@@ -246,16 +247,25 @@ wss.on('connection', (ws, req) => {
       return;
     }
     try {
-      let type = message.type || "chat";
       let userMessage = message.message || "";
-      if (type === "image") {
-        const img = await callStability(userMessage);
+      // User must use /imagine to generate images
+      if (typeof userMessage === "string" && userMessage.trim().toLowerCase().startsWith("/imagine")) {
+        const imgPrompt = userMessage.replace(/^\/imagine\s*/i, "").trim();
+        if (imgPrompt.length === 0) {
+          ws.send(JSON.stringify({
+            type: "bot",
+            content: "Please provide a prompt after `/imagine` for image generation.",
+            timestamp: new Date().toISOString()
+          }));
+          return;
+        }
+        const img = await callStability(imgPrompt);
         ws.send(JSON.stringify({
           type: "image",
           content: img,
           timestamp: new Date().toISOString()
         }));
-      } else if (type === "doc") {
+      } else if (message.type === "doc") {
         const analysis = await analyzeDocument(userMessage);
         ws.send(JSON.stringify({
           type: "bot",
