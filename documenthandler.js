@@ -1,41 +1,39 @@
-// documenthandler.js - All modular AI and file upload logic
+// documenthandler.js - Modular doc analysis (OpenAI), file upload, AI fallback
 
-const axios = require('axios');
 const multer = require('multer');
+const axios = require('axios');
 const mammoth = require('mammoth');
 
-// ---- Multer upload config ----
+// ---- Multer setup ----
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
       'application/pdf',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'image/png',
-      'image/jpeg',
-      'image/jpg'
+      'image/jpeg'
     ];
     if (allowedTypes.includes(file.mimetype)) cb(null, true);
     else cb(new Error('Invalid file type. Only PDF, DOCX, PNG, and JPEG allowed.'));
   }
 });
 
-// ---- Detect doc type ----
+// ---- DOC TYPE DETECTION ----
 function detectDocType(file) {
   const typeMap = {
     'application/pdf': 'pdf',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
     'image/png': 'png',
-    'image/jpeg': 'jpeg',
-    'image/jpg': 'jpg'
+    'image/jpeg': 'jpeg'
   };
   const document_type = typeMap[file.mimetype] || 'unknown';
   const confidence_score = document_type !== 'unknown' ? 1.0 : 0.5;
   return { document_type, confidence_score };
 }
 
-// ---- Universal OpenAI doc analysis ----
+// ---- Core Document Analysis (OpenAI only) ----
 async function analyzeDocument(text) {
   try {
     const response = await axios.post(
@@ -56,53 +54,69 @@ async function analyzeDocument(text) {
   }
 }
 
-// ---- Stability AI Image Generation ----
-async function callStability(prompt) {
-  try {
-    const response = await axios.post(
-      "https://api.stability.ai/v2beta/stable-image/generate/core",
-      {
-        prompt,
-        output_format: "png",
-        aspect_ratio: "1:1"
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.STABILITY_API_KEY}`,
-          Accept: "application/json"
-        }
-      }
-    );
-    if (response.data && response.data.image) {
-      if (/^[A-Za-z0-9+/=]+$/.test(response.data.image.trim())) {
-        return `data:image/png;base64,${response.data.image}`;
-      }
-      if (response.data.image.startsWith("http")) {
-        return response.data.image;
-      }
-    }
-    if (response.data && response.data.url) {
-      return response.data.url;
-    }
-    return "[Image not generated]";
-  } catch (err) {
-    console.error("Stability error:", err?.response?.data || err.message);
-    return "[Error generating image]";
-  }
-}
+// ---- File Upload & Extraction Handler ----
+const handleDocumentUpload = [
+  upload.single('file'),
+  async (req, res) => {
+    try {
+      let fileText = "";
+      const { document_type, confidence_score } = detectDocType(req.file);
 
-// ---- AI Fallback Chat Handler ----
+      if (req.file.mimetype === "application/pdf") {
+        const pdfParse = require('pdf-parse');
+        const data = await pdfParse(req.file.buffer);
+        fileText = data.text;
+      } else if (req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+        const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+        fileText = result.value;
+      } else if (req.file.mimetype === "image/png" || req.file.mimetype === "image/jpeg") {
+        const Tesseract = require('tesseract.js');
+        const result = await Tesseract.recognize(req.file.buffer, 'eng');
+        fileText = result.data.text;
+      }
+
+      // Use OpenAI for initial analysis
+      const analysis = await analyzeDocument(fileText);
+
+      res.json({
+        text: fileText,
+        analysis,
+        document_type,
+        confidence_score
+      });
+    } catch (err) {
+      console.error('Doc upload error:', err);
+      res.status(500).json({ error: "Failed to analyze document." });
+    }
+  }
+];
+
+// ---- Raw Text Analysis Handler ----
+const handleAnalyzeDocument = async (req, res) => {
+  try {
+    const { doc_text } = req.body;
+    if (!doc_text || typeof doc_text !== 'string' || !doc_text.trim()) {
+      return res.status(400).json({ error: "No document text provided." });
+    }
+    // Use OpenAI for analysis
+    const analysis = await analyzeDocument(doc_text);
+    res.json({ analysis });
+  } catch (err) {
+    console.error('Analyze endpoint error:', err);
+    res.status(500).json({ error: "Failed to analyze document text." });
+  }
+};
+
+// ---- AI Fallback Chat (for generic chat only, not doc analysis) ----
 async function callGemini(prompt) {
   try {
     const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + process.env.GEMINI_API_KEY;
     const response = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
     return response.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
   } catch (err) {
-    console.error("Gemini error:", err?.response?.data || err.message);
     return "";
   }
 }
-
 async function callOpenAI(prompt) {
   try {
     const response = await axios.post(
@@ -115,11 +129,9 @@ async function callOpenAI(prompt) {
     );
     return response.data.choices?.[0]?.message?.content || "";
   } catch (err) {
-    console.error("OpenAI error:", err?.response?.data || err.message);
     return "";
   }
 }
-
 async function callAnthropic(prompt) {
   try {
     const response = await axios.post(
@@ -139,11 +151,9 @@ async function callAnthropic(prompt) {
     );
     return response.data?.content?.[0]?.text || "";
   } catch (err) {
-    console.error("Anthropic error:", err?.response?.data || err.message);
     return "";
   }
 }
-
 async function callMistral(prompt) {
   try {
     const response = await axios.post(
@@ -161,11 +171,11 @@ async function callMistral(prompt) {
     );
     return response.data.choices?.[0]?.message?.content || "";
   } catch (err) {
-    console.error("Mistral error:", err?.response?.data || err.message);
     return "";
   }
 }
 
+// Fallback AI for chat (not for doc analysis!)
 async function fallbackAIChat(userMessage) {
   const providers = [
     { name: "Gemini",    fn: callGemini,    key: process.env.GEMINI_API_KEY },
@@ -177,75 +187,49 @@ async function fallbackAIChat(userMessage) {
     if (!provider.key) continue;
     try {
       const reply = await provider.fn(userMessage);
-      if (reply && !reply.startsWith("[")) {
-        console.log(`[AI reply] via ${provider.name}`);
-        return reply;
-      }
-    } catch (err) {
-      console.warn(`Provider ${provider.name} threw error:`, err.message);
-    }
+      if (reply && !reply.startsWith("[")) return reply;
+    } catch (err) { }
   }
   return "Sorry, all AI providers failed to respond. Please try again later.";
 }
 
-// ---- API HANDLERS ----
-const handleDocumentUpload = [
-  upload.single('file'),
-  async (req, res) => {
-    try {
-      let fileText = "";
-      const { document_type, confidence_score } = detectDocType(req.file);
-
-      if (req.file.mimetype === "application/pdf") {
-        const pdfParse = require('pdf-parse');
-        const data = await pdfParse(req.file.buffer);
-        fileText = data.text;
-      } else if (req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-        const result = await mammoth.extractRawText({ buffer: req.file.buffer });
-        fileText = result.value;
-      } else if (
-        req.file.mimetype === "image/png" ||
-        req.file.mimetype === "image/jpeg" ||
-        req.file.mimetype === "image/jpg"
-      ) {
-        const Tesseract = require('tesseract.js');
-        const result = await Tesseract.recognize(req.file.buffer, 'eng');
-        fileText = result.data.text;
-      }
-
-      const analysis = await analyzeDocument(fileText);
-
-      res.json({
-        text: fileText,
-        analysis,
-        document_type,
-        confidence_score
-      });
-    } catch (err) {
-      console.error('Doc upload error:', err);
-      res.status(500).json({ error: "Failed to analyze document." });
-    }
-  }
-];
-
-const handleAnalyzeDocument = async (req, res) => {
-  try {
-    const { doc_text } = req.body;
-    if (!doc_text || typeof doc_text !== 'string' || !doc_text.trim()) {
-      return res.status(400).json({ error: "No document text provided." });
-    }
-    const analysis = await analyzeDocument(doc_text);
-    res.json({ analysis });
-  } catch (err) {
-    console.error('Analyze endpoint error:', err);
-    res.status(500).json({ error: "Failed to analyze document text." });
-  }
-};
-
+// -------- Export everything needed by server.js -------
 module.exports = {
   handleDocumentUpload,
   handleAnalyzeDocument,
   analyzeDocument,
   fallbackAIChat,
-  callStability
+  // You may export callStability if needed for /imagine
+  callStability: async function(prompt) {
+    try {
+      const response = await axios.post(
+        "https://api.stability.ai/v2beta/stable-image/generate/core",
+        {
+          prompt,
+          output_format: "png",
+          aspect_ratio: "1:1"
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.STABILITY_API_KEY}`,
+            Accept: "application/json"
+          }
+        }
+      );
+      if (response.data && response.data.image) {
+        if (/^[A-Za-z0-9+/=]+$/.test(response.data.image.trim())) {
+          return `data:image/png;base64,${response.data.image}`;
+        }
+        if (response.data.image.startsWith("http")) {
+          return response.data.image;
+        }
+      }
+      if (response.data && response.data.url) {
+        return response.data.url;
+      }
+      return "[Image not generated]";
+    } catch (err) {
+      return "[Error generating image]";
+    }
+  }
 };
