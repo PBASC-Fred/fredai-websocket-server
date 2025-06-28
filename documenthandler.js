@@ -1,13 +1,15 @@
-// documenthandler.js
+// documenthandler.js - Modular Document Upload & AI Analysis
 
 const multer = require('multer');
 const mammoth = require('mammoth');
+const pdfParse = require('pdf-parse');
+const Tesseract = require('tesseract.js');
 const axios = require('axios');
 
-// Setup multer for in-memory file storage and size/type validation
+// --- Multer Setup (Memory Storage) ---
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
       'application/pdf',
@@ -20,7 +22,7 @@ const upload = multer({
   }
 });
 
-// Document type detection
+// --- Document Type Detection ---
 function detectDocType(file) {
   const typeMap = {
     'application/pdf': 'pdf',
@@ -33,7 +35,7 @@ function detectDocType(file) {
   return { document_type, confidence_score };
 }
 
-// Call OpenAI for document analysis
+// --- OpenAI Document Analysis ---
 async function analyzeDocument(text) {
   try {
     const response = await axios.post(
@@ -54,43 +56,43 @@ async function analyzeDocument(text) {
   }
 }
 
-// --- Express handler: POST /api/document ---
-const handleDocumentUpload = [
-  upload.single('file'),
-  async (req, res) => {
-    try {
-      let fileText = "";
-      const { document_type, confidence_score } = detectDocType(req.file);
-
-      if (req.file.mimetype === "application/pdf") {
-        const pdfParse = require('pdf-parse');
-        const data = await pdfParse(req.file.buffer);
-        fileText = data.text;
-      } else if (req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-        const result = await mammoth.extractRawText({ buffer: req.file.buffer });
-        fileText = result.value;
-      } else if (req.file.mimetype === "image/png" || req.file.mimetype === "image/jpeg") {
-        const Tesseract = require('tesseract.js');
-        const result = await Tesseract.recognize(req.file.buffer, 'eng');
-        fileText = result.data.text;
-      }
-
-      const analysis = await analyzeDocument(fileText);
-
-      res.json({
-        text: fileText,
-        analysis,
-        document_type,
-        confidence_score
-      });
-    } catch (err) {
-      console.error('Doc upload error:', err);
-      res.status(500).json({ error: "Failed to analyze document." });
+// --- /api/document: File Upload + Extract + Analyze ---
+const handleDocumentUpload = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded." });
     }
-  }
-];
+    let fileText = "";
+    const { document_type, confidence_score } = detectDocType(req.file);
 
-// --- Express handler: POST /api/analyze-document ---
+    if (req.file.mimetype === "application/pdf") {
+      const data = await pdfParse(req.file.buffer);
+      fileText = data.text;
+    } else if (req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+      fileText = result.value;
+    } else if (req.file.mimetype === "image/png" || req.file.mimetype === "image/jpeg") {
+      const result = await Tesseract.recognize(req.file.buffer, 'eng');
+      fileText = result.data.text;
+    } else {
+      fileText = "[Unsupported file type]";
+    }
+
+    const analysis = await analyzeDocument(fileText);
+
+    res.json({
+      text: fileText,
+      analysis,
+      document_type,
+      confidence_score
+    });
+  } catch (err) {
+    console.error('Doc upload error:', err);
+    res.status(500).json({ error: "Failed to analyze document." });
+  }
+};
+
+// --- /api/analyze-document: Raw Text Only ---
 const handleAnalyzeDocument = async (req, res) => {
   try {
     const { doc_text } = req.body;
@@ -106,7 +108,9 @@ const handleAnalyzeDocument = async (req, res) => {
 };
 
 module.exports = {
+  upload,                 // Use as middleware: upload.single('file')
+  detectDocType,
+  analyzeDocument,
   handleDocumentUpload,
-  handleAnalyzeDocument,
-  analyzeDocument // Optional: export if needed for other logic
+  handleAnalyzeDocument
 };
