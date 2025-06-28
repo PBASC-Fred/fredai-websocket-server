@@ -8,22 +8,23 @@ const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const Tesseract = require('tesseract.js');
-const OpenAI = require('openai');
+const { Configuration, OpenAIApi } = require('openai');
 
-//
-// ——— EXPRESS + HTTP SETUP ———
-//
+// ——— OpenAI client ———
+const openai = new OpenAIApi(
+  new Configuration({ apiKey: process.env.OPENAI_API_KEY })
+);
+
+// ——— Express + CORS + JSON ———
 const app = express();
 const server = http.createServer(app);
 
-// CORS for your front end
-// server.js
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://fredai-pbasc-trustedadvisor-project.vercel.app',      // ← add this
-  'https://fredai-pbasc-trustedadvisor-project-2025-ewkl…vercel.app', // ← and any others
+  'https://your-frontend-domain.com',
   'https://websocket-server-production-433e.up.railway.app'
 ];
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
@@ -32,105 +33,103 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Multer for HTTP uploads (10 MB limit)
+// ——— Multer for HTTP uploads ———
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter(req, file, cb) {
-    const allowed = [
+    const ok = [
       'application/pdf',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'image/png',
       'image/jpeg',
       'image/jpg'
-    ];
-    cb(null, allowed.includes(file.mimetype));
+    ].includes(file.mimetype);
+    cb(null, ok);
   }
 });
 
-// Helper: fallback AI — tries OpenAI → Gemini → Anthropic → Mistral
-async function callOpenAI(prompt) {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const resp = await openai.chat.completions.create({
+// ——— Helpers ———
+function detectDocType(mimetype) {
+  const map = {
+    'application/pdf': 'pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'image/png': 'png',
+    'image/jpeg': 'jpeg',
+    'image/jpg': 'jpg'
+  };
+  const document_type = map[mimetype] || 'unknown';
+  const confidence_score = document_type === 'unknown' ? 0.5 : 1.0;
+  return { document_type, confidence_score };
+}
+
+async function fallbackAI(prompt) {
+  const resp = await openai.createChatCompletion({
     model: 'gpt-4o',
     messages: [{ role: 'user', content: prompt }]
   });
-  return resp.choices[0].message.content;
-}
-// (For brevity, I’ve omitted Gemini/Anthropic/Mistral stubs — you can add them here as `async function callGemini(...) { … }` etc.)
-async function fallbackAI(prompt) {
-  // Try OpenAI
-  if (process.env.OPENAI_API_KEY) {
-    try { return await callOpenAI(prompt); } catch (e) { console.warn('OpenAI failed:', e); }
-  }
-  // ... then Gemini, Anthropic, Mistral if you’ve set their API keys
-  return 'Sorry, all AI providers failed to respond.';
+  return resp.data.choices[0].message.content;
 }
 
-// HTTP endpoint: upload a document via Multipart-Form
+// ——— HTTP Endpoints ———
+// Health-check
+app.get('/', (req, res) => {
+  res.send('FredAI server is up.');
+});
+
+// Upload + analyze document (HTTP)
 app.post('/api/document', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
-    const { mimetype, buffer, originalname: filename } = req.file;
 
-    // 1) extract text
+    const { mimetype, buffer, originalname: filename } = req.file;
+    const { document_type, confidence_score } = detectDocType(mimetype);
+
+    // 1) Extract text
     let text = '';
     if (mimetype.includes('pdf')) {
       text = (await pdfParse(buffer)).text;
     } else if (mimetype.includes('word')) {
       text = (await mammoth.extractRawText({ buffer })).value;
     } else {
-      // image: just OCR
       text = (await Tesseract.recognize(buffer, 'eng')).data.text;
     }
 
-    // 2) analysis
+    // 2) Analyze
     const analysis = await fallbackAI(text);
 
-    // 3) respond
-    let docType = 'unknown';
-    if (mimetype.includes('pdf')) docType = 'pdf';
-    else if (mimetype.includes('word')) docType = 'docx';
-    else if (mimetype.includes('png')) docType = 'png';
-    else if (mimetype.includes('jpeg') || mimetype.includes('jpg')) docType = 'jpeg';
-
-    res.json({
-      text,
-      analysis,
-      document_type: docType,
-      confidence_score: 1.0
-    });
+    return res.json({ text, analysis, document_type, confidence_score });
   } catch (err) {
     console.error('HTTP /api/document error:', err);
-    res.status(500).json({ error: 'Failed to analyze document.' });
+    return res.status(500).json({ error: 'Failed to analyze document.' });
   }
 });
 
-// HTTP endpoint: analyze raw text
+// Analyze raw text (HTTP)
 app.post('/api/analyze-document', async (req, res) => {
   try {
     const { doc_text } = req.body;
     if (!doc_text) return res.status(400).json({ error: 'No doc_text provided.' });
     const analysis = await fallbackAI(doc_text);
-    res.json({ analysis });
+    return res.json({ analysis });
   } catch (err) {
     console.error('HTTP /api/analyze-document error:', err);
-    res.status(500).json({ error: 'Failed to analyze document text.' });
+    return res.status(500).json({ error: 'Failed to analyze document text.' });
   }
 });
 
-//
-// ——— WEBSOCKET SETUP ———
-//
+// ——— WebSocket Server on `/ws` ———
 const wss = new WebSocket.Server({
   server,
+  path: '/ws',
   verifyClient: info => !info.origin || allowedOrigins.includes(info.origin)
 });
 
 wss.on('connection', ws => {
+  // send welcome
   ws.send(JSON.stringify({
     type: 'welcome',
-    content: "Welcome! You're connected to FredAI WebSocket server.",
+    content: "Welcome! You're connected to FredAI.",
     timestamp: new Date().toISOString()
   }));
 
@@ -139,39 +138,47 @@ wss.on('connection', ws => {
     try {
       msg = JSON.parse(raw);
     } catch {
-      return ws.send(JSON.stringify({ type: 'bot', content: 'Invalid JSON', timestamp: new Date().toISOString() }));
+      return ws.send(JSON.stringify({
+        type: 'bot',
+        content: '❌ Invalid JSON',
+        timestamp: new Date().toISOString()
+      }));
     }
 
     try {
-      // 1) Document upload over WS
+      // 1) Document upload via WS
       if (msg.type === 'upload_document') {
         const buffer = Buffer.from(msg.content, 'base64');
-        let text = '';
-        if (msg.mimetype.includes('pdf')) {
+        const { document_type, confidence_score } = detectDocType(msg.mimetype);
+        let text = '', analysis = '';
+
+        if (document_type === 'pdf') {
           text = (await pdfParse(buffer)).text;
-        } else if (msg.mimetype.includes('word')) {
+        } else if (document_type === 'docx') {
           text = (await mammoth.extractRawText({ buffer })).value;
         } else {
           text = (await Tesseract.recognize(buffer, 'eng')).data.text;
         }
-        const analysis = await fallbackAI(text);
+        analysis = await fallbackAI(text);
+
         return ws.send(JSON.stringify({
           type: 'upload_ack',
           filename: msg.filename,
           text,
           analysis,
-          document_type: msg.mimetype.includes('pdf') ? 'pdf'
-                          : msg.mimetype.includes('word') ? 'docx'
-                          : 'image',
-          confidence_score: 1.0
+          document_type,
+          confidence_score
         }));
       }
 
-      // 2) Ask a question about a document
+      // 2) Ask a question about a doc
       if (msg.type === 'ask_question') {
         const prompt = `${msg.doc_text}\n\nUSER QUESTION: ${msg.question}`;
         const answer = await fallbackAI(prompt);
-        return ws.send(JSON.stringify({ type: 'chat_response', answer }));
+        return ws.send(JSON.stringify({
+          type: 'chat_response',
+          answer
+        }));
       }
 
       // 3) General chat fallback
@@ -184,23 +191,22 @@ wss.on('connection', ws => {
         }));
       }
 
-      // Unknown
+      // unknown
       ws.send(JSON.stringify({
         type: 'bot',
-        content: "I didn't understand that message format.",
+        content: "❓ I didn't understand that message format.",
         timestamp: new Date().toISOString()
       }));
-
     } catch (err) {
       console.error('WS handler error:', err);
-      ws.send(JSON.stringify({ type: 'bot', content: 'Internal server error.' }));
+      ws.send(JSON.stringify({ type: 'bot', content: '⚠️ Internal server error.' }));
     }
   });
+
+  ws.on('close', () => console.log('Client disconnected'));
 });
 
-//
-// ——— START SERVER ———
-//
+// ——— Start HTTP+WS on same port ———
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
