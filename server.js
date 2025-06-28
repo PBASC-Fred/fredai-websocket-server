@@ -1,4 +1,4 @@
-// server.js - Multi-provider AI, user never sees [AI Provider] in chat
+// server.js - Multi-provider AI, interactive document chat, and image generation
 
 const express = require('express');
 const http = require('http');
@@ -29,10 +29,10 @@ async function callGemini(prompt) {
   try {
     const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + process.env.GEMINI_API_KEY;
     const response = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
-    return response.data.candidates?.[0]?.content?.parts?.[0]?.text || "[Gemini] No response.";
+    return response.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
   } catch (err) {
     console.error("Gemini error:", err?.response?.data || err.message);
-    return "[Gemini] Error processing your message.";
+    return "";
   }
 }
 
@@ -48,10 +48,10 @@ async function callOpenAI(prompt) {
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }
       }
     );
-    return response.data.choices?.[0]?.message?.content || "[OpenAI] No response.";
+    return response.data.choices?.[0]?.message?.content || "";
   } catch (err) {
     console.error("OpenAI error:", err?.response?.data || err.message);
-    return "[OpenAI] Error processing your message.";
+    return "";
   }
 }
 
@@ -72,10 +72,10 @@ async function callAnthropic(prompt) {
         }
       }
     );
-    return response.data?.content?.[0]?.text || "[Anthropic] No response.";
+    return response.data?.content?.[0]?.text || "";
   } catch (err) {
     console.error("Anthropic error:", err?.response?.data || err.message);
-    return "[Anthropic] Error processing your message.";
+    return "";
   }
 }
 
@@ -94,10 +94,10 @@ async function callMistral(prompt) {
         }
       }
     );
-    return response.data.choices?.[0]?.message?.content || "[Mistral] No response.";
+    return response.data.choices?.[0]?.message?.content || "";
   } catch (err) {
     console.error("Mistral error:", err?.response?.data || err.message);
-    return "[Mistral] Error processing your message.";
+    return "";
   }
 }
 
@@ -117,14 +117,11 @@ async function callStability(prompt) {
         }
       }
     );
-
-    // Try both possible return shapes
     if (response.data && response.data.image) {
-      // If image is base64, create a data URI
+      // base64 or URL
       if (/^[A-Za-z0-9+/=]+$/.test(response.data.image.trim())) {
         return `data:image/png;base64,${response.data.image}`;
       }
-      // If image is a URL
       if (response.data.image.startsWith("http")) {
         return response.data.image;
       }
@@ -132,10 +129,10 @@ async function callStability(prompt) {
     if (response.data && response.data.url) {
       return response.data.url;
     }
-    return "[Stability] No image returned.";
+    return "[Image not generated]";
   } catch (err) {
     console.error("Stability error:", err?.response?.data || err.message);
-    return "[Stability] Error generating image.";
+    return "[Error generating image]";
   }
 }
 
@@ -160,14 +157,14 @@ async function analyzeDocument(text) {
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }
       }
     );
-    return response.data.choices?.[0]?.message?.content || "[OpenAI] No analysis returned.";
+    return response.data.choices?.[0]?.message?.content || "[No analysis returned]";
   } catch (err) {
     console.error("OpenAI Doc Analysis error:", err?.response?.data || err.message);
-    return "[OpenAI] Error analyzing document.";
+    return "[Error analyzing document]";
   }
 }
 
-// ----- Fallback Chat Handler (no provider label in user reply) -----
+// ----- Fallback Chat Handler -----
 async function fallbackAIChat(userMessage) {
   const providers = [
     { name: "Gemini",    fn: callGemini,    key: process.env.GEMINI_API_KEY },
@@ -179,17 +176,10 @@ async function fallbackAIChat(userMessage) {
     if (!provider.key) continue;
     try {
       const reply = await provider.fn(userMessage);
-      if (
-        reply &&
-        !reply.startsWith(`[${provider.name}] Error`) &&
-        !reply.startsWith(`[${provider.name}] No response`)
-      ) {
-        // Log for your admin/debugging
-        console.log(`[AI reply] via ${provider.name}: ${reply}`);
-        // Return just the AI reply, no provider label
+      if (reply && !reply.startsWith("[")) {
+        console.log(`[AI reply] via ${provider.name}`);
         return reply;
       }
-      console.warn(`Provider ${provider.name} failed, trying next...`);
     } catch (err) {
       console.warn(`Provider ${provider.name} threw error:`, err.message);
     }
@@ -224,7 +214,7 @@ const pool = new Pool({
 });
 
 async function saveMessage(sessionId, role, message) {
-  // Implement database save here if needed.
+  // You can implement db save if you want. For now, just log.
   console.log(`[saveMessage] [${sessionId}] ${role}: ${message}`);
 }
 
@@ -262,8 +252,31 @@ wss.on('connection', (ws, req) => {
       return;
     }
     try {
+      // Interactive document chat handler
+      if (message.type === "document_chat") {
+        const { doc_text, userMessage } = message;
+        if (!doc_text || !userMessage) {
+          ws.send(JSON.stringify({
+            type: 'bot',
+            content: 'Missing document or question for document chat.',
+            timestamp: new Date().toISOString()
+          }));
+          return;
+        }
+        // Compose OpenAI prompt with doc + user question
+        const aiReply = await callOpenAI(
+          `DOCUMENT:\n${doc_text}\n\nUSER QUESTION:\n${userMessage}\n\nPlease answer using only information from the document above.`
+        );
+        ws.send(JSON.stringify({
+          type: 'bot',
+          content: aiReply,
+          timestamp: new Date().toISOString()
+        }));
+        return;
+      }
+
+      // /imagine image generation
       let userMessage = message.message || "";
-      // User must use /imagine to generate images
       if (typeof userMessage === "string" && userMessage.trim().toLowerCase().startsWith("/imagine")) {
         const imgPrompt = userMessage.replace(/^\/imagine\s*/i, "").trim();
         if (imgPrompt.length === 0) {
@@ -281,13 +294,15 @@ wss.on('connection', (ws, req) => {
           timestamp: new Date().toISOString()
         }));
       } else if (message.type === "doc") {
+        // Document analysis single-shot
         const analysis = await analyzeDocument(userMessage);
         ws.send(JSON.stringify({
           type: "bot",
           content: analysis,
           timestamp: new Date().toISOString()
         }));
-      } else { // fallback chat!
+      } else {
+        // fallback chat!
         await saveMessage(sessionId, 'user', userMessage);
         const botResponse = await fallbackAIChat(userMessage);
         await saveMessage(sessionId, 'bot', botResponse);
