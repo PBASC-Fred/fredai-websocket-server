@@ -17,13 +17,13 @@ async function callGemini(prompt) {
   const url =
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' +
     process.env.GEMINI_API_KEY;
-  const res = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
-  return res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const r = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
+  return r.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 
 async function callAnthropic(prompt) {
   if (!process.env.ANTHROPIC_API_KEY) return '';
-  const res = await axios.post(
+  const r = await axios.post(
     'https://api.anthropic.com/v1/messages',
     {
       model: 'claude-3-opus-20240229',
@@ -38,20 +38,20 @@ async function callAnthropic(prompt) {
       },
     }
   );
-  return res.data?.content?.[0]?.text || '';
+  return r.data?.content?.[0]?.text || '';
 }
 
 async function callMistral(prompt) {
   if (!process.env.MISTRAL_API_KEY) return '';
-  const res = await axios.post(
+  const r = await axios.post(
     'https://api.mistral.ai/v1/chat/completions',
     { model: 'mistral-large-latest', messages: [{ role: 'user', content: prompt }] },
     { headers: { Authorization: `Bearer ${process.env.MISTRAL_API_KEY}` } }
   );
-  return res.data.choices?.[0]?.message?.content || '';
+  return r.data.choices?.[0]?.message?.content || '';
 }
 
-// ——— Fallback Orchestrator ———
+// ——— Fallback ———
 const providers = [
   { name: 'OpenAI', fn: callOpenAI, key: process.env.OPENAI_API_KEY },
   { name: 'Gemini', fn: callGemini, key: process.env.GEMINI_API_KEY },
@@ -76,4 +76,3 @@ async function multiProviderDocAnalysis(prompt) {
 }
 
 module.exports = { multiProviderDocAnalysis };
-
