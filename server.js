@@ -1,21 +1,29 @@
-// server.js - AI doc analysis, multi-provider chat, file upload, websocket, type detection
+// server.js - Modular AI chat/image/websocket, file upload routed to documenthandler
 
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const axios = require('axios');
-const multer = require('multer');
-const mammoth = require("mammoth");
 require('dotenv').config();
+
+const {
+  handleDocumentUpload,
+  handleAnalyzeDocument,
+  analyzeDocument
+} = require('./documenthandler');
 
 const app = express();
 const server = http.createServer(app);
 
+// --------- Allowed Origins ---------
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3002",
-  // Add your deployed domains here...
+  "https://fredai-pbasc-trustedadvisor-project.vercel.app",
+  "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app",
+  "https://websocket-server-production-433e.up.railway.app",
+  "wss://websocket-server-production-433e.up.railway.app"
 ];
 
 // --------- AI PROVIDERS ---------
@@ -93,6 +101,7 @@ async function callMistral(prompt) {
   }
 }
 
+// --------- Stability AI IMAGE GENERATION ---------
 async function callStability(prompt) {
   try {
     const response = await axios.post(
@@ -127,26 +136,7 @@ async function callStability(prompt) {
   }
 }
 
-async function analyzeDocument(text) {
-  try {
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: "You are an expert in document analysis. Summarize or extract key information as requested." },
-          { role: "user", content: text }
-        ]
-      },
-      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
-    );
-    return response.data.choices?.[0]?.message?.content || "[No analysis returned]";
-  } catch (err) {
-    console.error("OpenAI Doc Analysis error:", err?.response?.data || err.message);
-    return "[Error analyzing document]";
-  }
-}
-
+// --------- AI Fallback Chat Handler ---------
 async function fallbackAIChat(userMessage) {
   const providers = [
     { name: "Gemini",    fn: callGemini,    key: process.env.GEMINI_API_KEY },
@@ -169,92 +159,24 @@ async function fallbackAIChat(userMessage) {
   return "Sorry, all AI providers failed to respond. Please try again later.";
 }
 
-// --------- EXPRESS & UPLOAD ---------
-app.use(cors());
+// --------- EXPRESS SETUP ---------
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  }
+}));
 app.use(express.json());
 
+// --------- Health Check ---------
 app.get('/', (req, res) => {
   res.status(200).send('FredAI WebSocket server is running.');
 });
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = [
-      'application/pdf',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'image/png',
-      'image/jpeg'
-    ];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only PDF, DOCX, PNG, and JPEG files are allowed.'));
-    }
-  }
-});
-
-// --------- DOC TYPE DETECTION ---------
-function detectDocType(file) {
-  const typeMap = {
-    'application/pdf': 'pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-    'image/png': 'png',
-    'image/jpeg': 'jpeg'
-  };
-  const document_type = typeMap[file.mimetype] || 'unknown';
-  const confidence_score = document_type !== 'unknown' ? 1.0 : 0.5;
-  return { document_type, confidence_score };
-}
-
-// --------- /api/document (Upload + Extract + Detect) ---------
-app.post('/api/document', upload.single('file'), async (req, res) => {
-  try {
-    let fileText = "";
-    const { document_type, confidence_score } = detectDocType(req.file);
-
-    if (req.file.mimetype === "application/pdf") {
-      const pdfParse = require('pdf-parse');
-      const data = await pdfParse(req.file.buffer);
-      fileText = data.text;
-    } else if (req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-      const result = await mammoth.extractRawText({ buffer: req.file.buffer });
-      fileText = result.value;
-    } else if (req.file.mimetype === "image/png" || req.file.mimetype === "image/jpeg") {
-      const Tesseract = require('tesseract.js');
-      const result = await Tesseract.recognize(req.file.buffer, 'eng');
-      fileText = result.data.text;
-    }
-
-    const analysis = await analyzeDocument(fileText);
-
-    res.json({
-      text: fileText,
-      analysis,
-      document_type,
-      confidence_score
-    });
-  } catch (err) {
-    console.error('Doc upload error:', err);
-    res.status(500).json({ error: "Failed to analyze document." });
-  }
-});
-
-// --------- /api/analyze-document (raw text only) ---------
-app.post('/api/analyze-document', async (req, res) => {
-  try {
-    const { doc_text } = req.body;
-    if (!doc_text || typeof doc_text !== 'string' || !doc_text.trim()) {
-      return res.status(400).json({ error: "No document text provided." });
-    }
-    const analysis = await analyzeDocument(doc_text);
-    res.json({ analysis });
-  } catch (err) {
-    console.error('Analyze endpoint error:', err);
-    res.status(500).json({ error: "Failed to analyze document text." });
-  }
-});
+// --------- Document Analysis Routes ---------
+app.post('/api/document', handleDocumentUpload);
+app.post('/api/analyze-document', handleAnalyzeDocument);
 
 // --------- WEBSOCKET SERVER ---------
 const wss = new WebSocket.Server({
@@ -290,32 +212,9 @@ wss.on('connection', (ws, req) => {
       return;
     }
     try {
-      // Interactive document chat handler
-      if (message.type === "document_chat") {
-        const { doc_text, userMessage } = message;
-        if (!doc_text || !userMessage) {
-          ws.send(JSON.stringify({
-            type: 'bot',
-            content: 'Missing document or question for document chat.',
-            timestamp: new Date().toISOString()
-          }));
-          return;
-        }
-        const aiReply = await callOpenAI(
-          `DOCUMENT:\n${doc_text}\n\nUSER QUESTION:\n${userMessage}\n\nPlease answer using only information from the document above.`
-        );
-        ws.send(JSON.stringify({
-          type: 'document_chat_complete',
-          answer: aiReply,
-          timestamp: new Date().toISOString()
-        }));
-        return;
-      }
-
       // /imagine image generation
-      let userMessage = message.message || "";
-      if (typeof userMessage === "string" && userMessage.trim().toLowerCase().startsWith("/imagine")) {
-        const imgPrompt = userMessage.replace(/^\/imagine\s*/i, "").trim();
+      if (typeof message.message === "string" && message.message.trim().toLowerCase().startsWith("/imagine")) {
+        const imgPrompt = message.message.replace(/^\/imagine\s*/i, "").trim();
         if (imgPrompt.length === 0) {
           ws.send(JSON.stringify({
             type: "bot",
@@ -330,23 +229,15 @@ wss.on('connection', (ws, req) => {
           content: img,
           timestamp: new Date().toISOString()
         }));
-      } else if (message.type === "doc") {
-        // Document analysis single-shot
-        const analysis = await analyzeDocument(userMessage);
-        ws.send(JSON.stringify({
-          type: "bot",
-          content: analysis,
-          timestamp: new Date().toISOString()
-        }));
-      } else {
-        // fallback chat!
-        const botResponse = await fallbackAIChat(userMessage);
-        ws.send(JSON.stringify({
-          type: 'bot',
-          content: botResponse,
-          timestamp: new Date().toISOString()
-        }));
+        return;
       }
+      // Standard chat (AI fallback)
+      const botResponse = await fallbackAIChat(message.message);
+      ws.send(JSON.stringify({
+        type: 'bot',
+        content: botResponse,
+        timestamp: new Date().toISOString()
+      }));
     } catch (err) {
       console.error('[WS] Error in chat handling:', err);
       ws.send(JSON.stringify({
@@ -355,18 +246,4 @@ wss.on('connection', (ws, req) => {
         timestamp: new Date().toISOString()
       }));
     }
-  });
-
-  ws.on('close', () => {
-    console.log('[WS] Client disconnected:', sessionId);
-  });
-
-  ws.on('error', (error) => {
-    console.error('[WS] WebSocket error:', error);
-  });
-});
-
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`WebSocket server running on port ${PORT}`);
-});
+  });  
