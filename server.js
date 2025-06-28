@@ -1,168 +1,30 @@
-// server.js - Modular AI chat/image/websocket, file upload routed to documenthandler
+// server.js - Modular AI chat/image/websocket, document upload routed to documenthandler
 
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
-const axios = require('axios');
 require('dotenv').config();
 
 const {
-  upload,
   handleDocumentUpload,
   handleAnalyzeDocument,
-  analyzeDocument
+  fallbackAIChat,
+  callStability,
 } = require('./documenthandler');
 
 const app = express();
 const server = http.createServer(app);
 
-// --------- Allowed Origins ---------
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3002",
   "https://fredai-pbasc-trustedadvisor-project.vercel.app",
   "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app",
   "https://websocket-server-production-433e.up.railway.app",
-  "wss://websocket-server-production-433e.up.railway.app",
-  // ADD THIS LINE:
-  "https://fredai-pbasc-trustedadvisor-project-2025-c1u24ra69.vercel.app"
+  "wss://websocket-server-production-433e.up.railway.app"
 ];
 
-// --------- AI PROVIDERS ---------
-async function callGemini(prompt) {
-  try {
-    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + process.env.GEMINI_API_KEY;
-    const response = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
-    return response.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  } catch (err) {
-    console.error("Gemini error:", err?.response?.data || err.message);
-    return "";
-  }
-}
-
-async function callOpenAI(prompt) {
-  try {
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4o",
-        messages: [{ role: "user", content: prompt }]
-      },
-      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
-    );
-    return response.data.choices?.[0]?.message?.content || "";
-  } catch (err) {
-    console.error("OpenAI error:", err?.response?.data || err.message);
-    return "";
-  }
-}
-
-async function callAnthropic(prompt) {
-  try {
-    const response = await axios.post(
-      "https://api.anthropic.com/v1/messages",
-      {
-        model: "claude-3-opus-20240229",
-        max_tokens: 2048,
-        messages: [{ role: "user", content: prompt }]
-      },
-      {
-        headers: {
-          "x-api-key": process.env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json"
-        }
-      }
-    );
-    return response.data?.content?.[0]?.text || "";
-  } catch (err) {
-    console.error("Anthropic error:", err?.response?.data || err.message);
-    return "";
-  }
-}
-
-async function callMistral(prompt) {
-  try {
-    const response = await axios.post(
-      "https://api.mistral.ai/v1/chat/completions",
-      {
-        model: "mistral-large-latest",
-        messages: [{ role: "user", content: prompt }]
-      },
-      {
-        headers: {
-          "Authorization": `Bearer ${process.env.MISTRAL_API_KEY}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-    return response.data.choices?.[0]?.message?.content || "";
-  } catch (err) {
-    console.error("Mistral error:", err?.response?.data || err.message);
-    return "";
-  }
-}
-
-// --------- Stability AI IMAGE GENERATION ---------
-async function callStability(prompt) {
-  try {
-    const response = await axios.post(
-      "https://api.stability.ai/v2beta/stable-image/generate/core",
-      {
-        prompt,
-        output_format: "png",
-        aspect_ratio: "1:1"
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.STABILITY_API_KEY}`,
-          Accept: "application/json"
-        }
-      }
-    );
-    if (response.data && response.data.image) {
-      if (/^[A-Za-z0-9+/=]+$/.test(response.data.image.trim())) {
-        return `data:image/png;base64,${response.data.image}`;
-      }
-      if (response.data.image.startsWith("http")) {
-        return response.data.image;
-      }
-    }
-    if (response.data && response.data.url) {
-      return response.data.url;
-    }
-    return "[Image not generated]";
-  } catch (err) {
-    console.error("Stability error:", err?.response?.data || err.message);
-    return "[Error generating image]";
-  }
-}
-
-// --------- AI Fallback Chat Handler ---------
-async function fallbackAIChat(userMessage) {
-  const providers = [
-    { name: "Gemini",    fn: callGemini,    key: process.env.GEMINI_API_KEY },
-    { name: "OpenAI",    fn: callOpenAI,    key: process.env.OPENAI_API_KEY },
-    { name: "Anthropic", fn: callAnthropic, key: process.env.ANTHROPIC_API_KEY },
-    { name: "Mistral",   fn: callMistral,   key: process.env.MISTRAL_API_KEY }
-  ];
-  for (const provider of providers) {
-    if (!provider.key) continue;
-    try {
-      const reply = await provider.fn(userMessage);
-      if (reply && !reply.startsWith("[")) {
-        console.log(`[AI reply] via ${provider.name}`);
-        return reply;
-      }
-    } catch (err) {
-      console.warn(`Provider ${provider.name} threw error:`, err.message);
-    }
-  }
-  return "Sorry, all AI providers failed to respond. Please try again later.";
-}
-
-// --------- EXPRESS SETUP ---------
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
@@ -177,11 +39,11 @@ app.get('/', (req, res) => {
   res.status(200).send('FredAI WebSocket server is running.');
 });
 
-// --------- Document Analysis Routes ---------
-app.post('/api/document', upload.single('file'), handleDocumentUpload);
+// --------- Document Analysis Routes (NO multer here) ---------
+app.post('/api/document', handleDocumentUpload);
 app.post('/api/analyze-document', handleAnalyzeDocument);
 
-// --------- WEBSOCKET SERVER ---------
+// --------- WebSocket Server ---------
 const wss = new WebSocket.Server({
   server,
   verifyClient: (info) => {
@@ -192,7 +54,7 @@ const wss = new WebSocket.Server({
   }
 });
 
-wss.on('connection', (ws, req) => {
+wss.on('connection', (ws) => {
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   console.log('[WS] New client connected:', sessionId);
 
@@ -215,29 +77,6 @@ wss.on('connection', (ws, req) => {
       return;
     }
     try {
-      // Interactive document chat handler
-      if (message.type === "document_chat") {
-        const { doc_text, userMessage } = message;
-        if (!doc_text || !userMessage) {
-          ws.send(JSON.stringify({
-            type: 'bot',
-            content: 'Missing document or question for document chat.',
-            timestamp: new Date().toISOString()
-          }));
-          return;
-        }
-        const aiReply = await analyzeDocument(
-          `DOCUMENT:\n${doc_text}\n\nUSER QUESTION:\n${userMessage}\n\nPlease answer using only information from the document above.`
-        );
-        ws.send(JSON.stringify({
-          type: 'document_chat_complete',
-          answer: aiReply,
-          timestamp: new Date().toISOString()
-        }));
-        return;
-      }
-
-      // /imagine image generation
       let userMessage = message.message || "";
       if (typeof userMessage === "string" && userMessage.trim().toLowerCase().startsWith("/imagine")) {
         const imgPrompt = userMessage.replace(/^\/imagine\s*/i, "").trim();
@@ -255,16 +94,7 @@ wss.on('connection', (ws, req) => {
           content: img,
           timestamp: new Date().toISOString()
         }));
-      } else if (message.type === "doc") {
-        // Document analysis single-shot
-        const analysis = await analyzeDocument(userMessage);
-        ws.send(JSON.stringify({
-          type: "bot",
-          content: analysis,
-          timestamp: new Date().toISOString()
-        }));
       } else {
-        // fallback chat!
         const botResponse = await fallbackAIChat(userMessage);
         ws.send(JSON.stringify({
           type: 'bot',
@@ -291,8 +121,7 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// --------- Start Server ---------
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`WebSocket server running on port ${PORT}`);
 });
