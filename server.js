@@ -2,14 +2,11 @@
 
 const express = require('express');
 const http = require('http');
-const WebSocket = require('ws');
 const cors = require('cors');
-const axios = require('axios');
 require('dotenv').config();
-
 const {
   handleDocumentUpload,
-  handleAnalyzeDocument
+  handleAnalyzeDocument,
 } = require('./documenthandler');
 
 const app = express();
@@ -163,6 +160,7 @@ async function fallbackAIChat(userMessage) {
 // --------- EXPRESS SETUP ---------
 app.use(cors({
   origin: (origin, callback) => {
+    // allow requests with no origin (e.g. mobile apps)
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('Not allowed by CORS'));
@@ -170,14 +168,17 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// --------- Health Check ---------
+// Health check endpoint
 app.get('/', (req, res) => {
   res.status(200).send('FredAI WebSocket server is running.');
 });
 
-// --------- Document Analysis Routes ---------
+// Document upload endpoint (POST /api/document)
 app.post('/api/document', handleDocumentUpload);
+
+// Analyze document text (POST /api/analyze-document)
 app.post('/api/analyze-document', handleAnalyzeDocument);
+
 
 // --------- WEBSOCKET SERVER ---------
 const wss = new WebSocket.Server({
@@ -259,6 +260,7 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// Start the server
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`WebSocket server running on port ${PORT}`);
