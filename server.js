@@ -156,4 +156,49 @@ wss.on('connection', ws => {
         }
 
         analysis = await fallbackAI(text);
-        return ws.send(JSON.s
+        return ws.send(JSON.stringify({
+          type: 'upload_ack',
+          filename: msg.filename,
+          text,
+          analysis,
+          document_type: detectDocType(msg.mimetype),
+          confidence_score: 1.0
+        }));
+      }
+
+      // 2) ask_question about a document
+      if (msg.type === 'ask_question') {
+        const prompt = `${msg.doc_text}\n\nUSER QUESTION: ${msg.question}`;
+        const answer = await fallbackAI(prompt);
+        return ws.send(JSON.stringify({ type: 'chat_response', answer }));
+      }
+
+      // 3) general chat fallback
+      if (typeof msg.message === 'string') {
+        const reply = await fallbackAI(msg.message);
+        return ws.send(JSON.stringify({
+          type: 'bot',
+          content: reply,
+          timestamp: new Date().toISOString()
+        }));
+      }
+
+      // unknown
+      ws.send(JSON.stringify({
+        type: 'bot',
+        content: "I didn't understand that message.",
+        timestamp: new Date().toISOString()
+      }));
+
+    } catch (err) {
+      console.error('WS handler error:', err);
+      ws.send(JSON.stringify({ type: 'bot', content: 'Server error.' }));
+    }
+  });
+});
+
+// Start server
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
