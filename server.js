@@ -1,12 +1,12 @@
-// server.js - Multi-provider AI, interactive document chat, and image generation
+// server.js - AI doc analysis, multi-provider chat, file upload, websocket, type detection
 
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const axios = require('axios');
-const { Pool } = require('pg');
 const multer = require('multer');
+const mammoth = require("mammoth");
 require('dotenv').config();
 
 const app = express();
@@ -15,16 +15,10 @@ const server = http.createServer(app);
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3002",
-  "https://gitlab-importer-nladay2f.devinapps.com",
-  "https://fredai-pbasc-trustedadvisor-project-2025-kfzj7qzsn.vercel.app",
-  "https://fredai-drab.vercel.app",
-  "https://fredai-pbasc-trustedadvisor-git-63d81c-pbasc-trustadvisor-chat.vercel.app",
-  "https://fredai-pbasc-trustedadvisor-project.vercel.app",
-  "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app"
+  // Add your deployed domains here...
 ];
 
-// ----- Provider Callers -----
-
+// --------- AI PROVIDERS ---------
 async function callGemini(prompt) {
   try {
     const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + process.env.GEMINI_API_KEY;
@@ -44,9 +38,7 @@ async function callOpenAI(prompt) {
         model: "gpt-4o",
         messages: [{ role: "user", content: prompt }]
       },
-      {
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }
-      }
+      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
     );
     return response.data.choices?.[0]?.message?.content || "";
   } catch (err) {
@@ -118,7 +110,6 @@ async function callStability(prompt) {
       }
     );
     if (response.data && response.data.image) {
-      // base64 or URL
       if (/^[A-Za-z0-9+/=]+$/.test(response.data.image.trim())) {
         return `data:image/png;base64,${response.data.image}`;
       }
@@ -143,19 +134,11 @@ async function analyzeDocument(text) {
       {
         model: "gpt-4o",
         messages: [
-          {
-            role: "system",
-            content: "You are an expert in document analysis. Summarize or extract key information as requested."
-          },
-          {
-            role: "user",
-            content: text
-          }
+          { role: "system", content: "You are an expert in document analysis. Summarize or extract key information as requested." },
+          { role: "user", content: text }
         ]
       },
-      {
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }
-      }
+      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
     );
     return response.data.choices?.[0]?.message?.content || "[No analysis returned]";
   } catch (err) {
@@ -164,7 +147,6 @@ async function analyzeDocument(text) {
   }
 }
 
-// ----- Fallback Chat Handler -----
 async function fallbackAIChat(userMessage) {
   const providers = [
     { name: "Gemini",    fn: callGemini,    key: process.env.GEMINI_API_KEY },
@@ -187,7 +169,7 @@ async function fallbackAIChat(userMessage) {
   return "Sorry, all AI providers failed to respond. Please try again later.";
 }
 
-// ----- Express and Middleware -----
+// --------- EXPRESS & UPLOAD ---------
 app.use(cors());
 app.use(express.json());
 
@@ -199,26 +181,82 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['application/pdf', 'image/png', 'image/jpeg'];
+    const allowedTypes = [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'image/png',
+      'image/jpeg'
+    ];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only PDF, PNG, and JPEG files are allowed.'));
+      cb(new Error('Invalid file type. Only PDF, DOCX, PNG, and JPEG files are allowed.'));
     }
   }
 });
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
-});
-
-async function saveMessage(sessionId, role, message) {
-  // You can implement db save if you want. For now, just log.
-  console.log(`[saveMessage] [${sessionId}] ${role}: ${message}`);
+// --------- DOC TYPE DETECTION ---------
+function detectDocType(file) {
+  const typeMap = {
+    'application/pdf': 'pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'image/png': 'png',
+    'image/jpeg': 'jpeg'
+  };
+  const document_type = typeMap[file.mimetype] || 'unknown';
+  const confidence_score = document_type !== 'unknown' ? 1.0 : 0.5;
+  return { document_type, confidence_score };
 }
 
-// ----- WebSocket Server -----
+// --------- /api/document (Upload + Extract + Detect) ---------
+app.post('/api/document', upload.single('file'), async (req, res) => {
+  try {
+    let fileText = "";
+    const { document_type, confidence_score } = detectDocType(req.file);
+
+    if (req.file.mimetype === "application/pdf") {
+      const pdfParse = require('pdf-parse');
+      const data = await pdfParse(req.file.buffer);
+      fileText = data.text;
+    } else if (req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+      fileText = result.value;
+    } else if (req.file.mimetype === "image/png" || req.file.mimetype === "image/jpeg") {
+      const Tesseract = require('tesseract.js');
+      const result = await Tesseract.recognize(req.file.buffer, 'eng');
+      fileText = result.data.text;
+    }
+
+    const analysis = await analyzeDocument(fileText);
+
+    res.json({
+      text: fileText,
+      analysis,
+      document_type,
+      confidence_score
+    });
+  } catch (err) {
+    console.error('Doc upload error:', err);
+    res.status(500).json({ error: "Failed to analyze document." });
+  }
+});
+
+// --------- /api/analyze-document (raw text only) ---------
+app.post('/api/analyze-document', async (req, res) => {
+  try {
+    const { doc_text } = req.body;
+    if (!doc_text || typeof doc_text !== 'string' || !doc_text.trim()) {
+      return res.status(400).json({ error: "No document text provided." });
+    }
+    const analysis = await analyzeDocument(doc_text);
+    res.json({ analysis });
+  } catch (err) {
+    console.error('Analyze endpoint error:', err);
+    res.status(500).json({ error: "Failed to analyze document text." });
+  }
+});
+
+// --------- WEBSOCKET SERVER ---------
 const wss = new WebSocket.Server({
   server,
   verifyClient: (info) => {
@@ -263,13 +301,12 @@ wss.on('connection', (ws, req) => {
           }));
           return;
         }
-        // Compose OpenAI prompt with doc + user question
         const aiReply = await callOpenAI(
           `DOCUMENT:\n${doc_text}\n\nUSER QUESTION:\n${userMessage}\n\nPlease answer using only information from the document above.`
         );
         ws.send(JSON.stringify({
-          type: 'bot',
-          content: aiReply,
+          type: 'document_chat_complete',
+          answer: aiReply,
           timestamp: new Date().toISOString()
         }));
         return;
@@ -303,9 +340,7 @@ wss.on('connection', (ws, req) => {
         }));
       } else {
         // fallback chat!
-        await saveMessage(sessionId, 'user', userMessage);
         const botResponse = await fallbackAIChat(userMessage);
-        await saveMessage(sessionId, 'bot', botResponse);
         ws.send(JSON.stringify({
           type: 'bot',
           content: botResponse,
@@ -329,27 +364,6 @@ wss.on('connection', (ws, req) => {
   ws.on('error', (error) => {
     console.error('[WS] WebSocket error:', error);
   });
-});
-
-// ----- Document Upload HTTP endpoint -----
-app.post('/api/document', upload.single('file'), async (req, res) => {
-  try {
-    let fileText = "";
-    if (req.file.mimetype === "application/pdf") {
-      const pdfParse = require('pdf-parse');
-      const data = await pdfParse(req.file.buffer);
-      fileText = data.text;
-    } else if (req.file.mimetype === "image/png" || req.file.mimetype === "image/jpeg") {
-      const Tesseract = require('tesseract.js');
-      const result = await Tesseract.recognize(req.file.buffer, 'eng');
-      fileText = result.data.text;
-    }
-    const analysis = await analyzeDocument(fileText);
-    res.json({ analysis });
-  } catch (err) {
-    console.error('Doc upload error:', err);
-    res.status(500).json({ error: "Failed to analyze document." });
-  }
 });
 
 const PORT = process.env.PORT || 3001;
