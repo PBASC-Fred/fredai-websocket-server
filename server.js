@@ -1,4 +1,4 @@
-// server.js - AI fallback chat, image generation, document analysis, WebSocket
+// server.js - Modular AI chat/image/websocket, file upload routed to documenthandler
 
 const express = require('express');
 const http = require('http');
@@ -15,40 +15,19 @@ const {
 const app = express();
 const server = http.createServer(app);
 
-// ---- Allowed Origins ----
+// --------- Allowed Origins ---------
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3002",
   "https://fredai-pbasc-trustedadvisor-project.vercel.app",
   "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app",
   "https://fredai-pnxkiveu1-pbasc-trustadvisor-chat.vercel.app",
-  "https://fredai-pbasc-trustedadvisor-project-2025-lff7121at.vercel.app", // <-- your new domain here
+  "https://fredai-pbasc-trustedadvisor-project-2025-lff7121at.vercel.app",
   "https://websocket-server-production-433e.up.railway.app",
   "wss://websocket-server-production-433e.up.railway.app"
 ];
 
-
-// ---- Health check route (ALWAYS 200, even for bots/screenshots) ----
-app.get('/', (req, res) => {
-  res.status(200).send('FredAI WebSocket server is running.');
-});
-
-// ---- CORS ----
-app.use(cors({
-  origin: (origin, callback) => {
-    // allow curl/health checks/screenshot bots, or allowed frontend origins
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
-  }
-}));
-app.use(express.json());
-
-// ---- Document Analysis Routes ----
-app.post('/api/document', handleDocumentUpload);
-app.post('/api/analyze-document', handleAnalyzeDocument);
-
-// ---- AI PROVIDERS ----
+// --------- AI PROVIDERS ---------
 async function callGemini(prompt) {
   try {
     const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + process.env.GEMINI_API_KEY;
@@ -123,7 +102,7 @@ async function callMistral(prompt) {
   }
 }
 
-// ---- Stability AI IMAGE GENERATION ----
+// --------- Stability AI IMAGE GENERATION ---------
 async function callStability(prompt) {
   try {
     const response = await axios.post(
@@ -158,7 +137,7 @@ async function callStability(prompt) {
   }
 }
 
-// ---- AI Fallback Chat Handler ----
+// --------- AI Fallback Chat Handler ---------
 async function fallbackAIChat(userMessage) {
   const providers = [
     { name: "Gemini",    fn: callGemini,    key: process.env.GEMINI_API_KEY },
@@ -181,7 +160,26 @@ async function fallbackAIChat(userMessage) {
   return "Sorry, all AI providers failed to respond. Please try again later.";
 }
 
-// ---- WEBSOCKET SERVER ----
+// --------- EXPRESS SETUP ---------
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  }
+}));
+app.use(express.json());
+
+// --------- Health Check ---------
+app.get('/', (req, res) => {
+  res.status(200).send('FredAI WebSocket server is running.');
+});
+
+// --------- Document Analysis Routes ---------
+app.post('/api/document', handleDocumentUpload);
+app.post('/api/analyze-document', handleAnalyzeDocument);
+
+// --------- WEBSOCKET SERVER ---------
 const wss = new WebSocket.Server({
   server,
   verifyClient: (info) => {
@@ -215,28 +213,6 @@ wss.on('connection', (ws, req) => {
       return;
     }
     try {
-      // Interactive document chat handler (handled via OpenAI fallback, customize as needed)
-      if (message.type === "document_chat") {
-        const { doc_text, userMessage } = message;
-        if (!doc_text || !userMessage) {
-          ws.send(JSON.stringify({
-            type: 'bot',
-            content: 'Missing document or question for document chat.',
-            timestamp: new Date().toISOString()
-          }));
-          return;
-        }
-        const aiReply = await callOpenAI(
-          `DOCUMENT:\n${doc_text}\n\nUSER QUESTION:\n${userMessage}\n\nPlease answer using only information from the document above.`
-        );
-        ws.send(JSON.stringify({
-          type: 'document_chat_complete',
-          answer: aiReply,
-          timestamp: new Date().toISOString()
-        }));
-        return;
-      }
-
       // /imagine image generation
       let userMessage = message.message || "";
       if (typeof userMessage === "string" && userMessage.trim().toLowerCase().startsWith("/imagine")) {
@@ -255,16 +231,8 @@ wss.on('connection', (ws, req) => {
           content: img,
           timestamp: new Date().toISOString()
         }));
-      } else if (message.type === "doc") {
-        // Document analysis single-shot
-        const docAnalysis = await fallbackAIChat(userMessage);
-        ws.send(JSON.stringify({
-          type: "bot",
-          content: docAnalysis,
-          timestamp: new Date().toISOString()
-        }));
       } else {
-        // Fallback AI chat!
+        // fallback chat!
         const botResponse = await fallbackAIChat(userMessage);
         ws.send(JSON.stringify({
           type: 'bot',
@@ -291,7 +259,6 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// ---- Start Server ----
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`WebSocket server running on port ${PORT}`);
