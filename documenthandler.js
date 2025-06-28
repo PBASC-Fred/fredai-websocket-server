@@ -1,197 +1,136 @@
-const multer = require('multer');
-const mammoth = require("mammoth");
-const axios = require('axios');
+// documenthandler.js
+// WebSocket-based document upload, analysis, and Q&A handler
+
 const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
 const Tesseract = require('tesseract.js');
+const { Configuration, OpenAIApi } = require('openai');
+const { multiProviderDocAnalysis } = require('./ai');
+require('dotenv').config();
 
-// Multer upload config
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = [
-      'application/pdf',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'image/png',
-      'image/jpeg'
-    ];
-    if (allowedTypes.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Invalid file type. Only PDF, DOCX, PNG, and JPEG allowed.'));
-  }
-});
+// === OpenAI Vision client ===
+const openai = new OpenAIApi(
+  new Configuration({ apiKey: process.env.OPENAI_API_KEY })
+);
 
-// Helper: Detect doc type
-function detectDocType(file) {
-  const typeMap = {
+// Map MIME types to our document_type and confidence
+function detectDocType(mimetype) {
+  const map = {
     'application/pdf': 'pdf',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
     'image/png': 'png',
-    'image/jpeg': 'jpeg'
+    'image/jpeg': 'jpeg',
+    'image/jpg': 'jpg'
   };
-  const document_type = typeMap[file.mimetype] || 'unknown';
-  const confidence_score = document_type !== 'unknown' ? 1.0 : 0.5;
+  const document_type = map[mimetype] || 'unknown';
+  const confidence_score = document_type === 'unknown' ? 0.5 : 1.0;
   return { document_type, confidence_score };
 }
 
-// ==== AI PROVIDERS ====
-
-// 1. OpenAI
-async function callOpenAI(text) {
-  try {
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
+// Use OpenAI Vision to extract & summarize image content
+async function analyzeImageWithOpenAI(buffer, mimetype) {
+  const b64 = buffer.toString('base64');
+  const dataUrl = `data:${mimetype};base64,${b64}`;
+  const resp = await openai.createChatCompletion({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'system', content: 'You are an expert at understanding document images.' },
+      { role: 'user', content: 'Please extract any text and summarize the content of this document image.' },
       {
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: "You are an expert in document analysis. Summarize or extract key information as requested." },
-          { role: "user", content: text }
-        ]
-      },
-      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
-    );
-    return response.data.choices?.[0]?.message?.content || "";
-  } catch (err) {
-    console.error("OpenAI Doc Analysis error:", err?.response?.data || err.message);
-    return "";
-  }
-}
-
-// 2. Gemini (Google)
-async function callGemini(text) {
-  try {
-    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + process.env.GEMINI_API_KEY;
-    const response = await axios.post(url, { contents: [{ parts: [{ text }] }] });
-    return response.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  } catch (err) {
-    console.error("Gemini Doc Analysis error:", err?.response?.data || err.message);
-    return "";
-  }
-}
-
-// 3. Anthropic
-async function callAnthropic(text) {
-  try {
-    const response = await axios.post(
-      "https://api.anthropic.com/v1/messages",
-      {
-        model: "claude-3-opus-20240229",
-        max_tokens: 2048,
-        messages: [
-          { role: "user", content: text }
-        ]
-      },
-      {
-        headers: {
-          "x-api-key": process.env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json"
-        }
+        type: 'input_image',
+        image_url: dataUrl,
+        detail: 'high'
       }
-    );
-    return response.data?.content?.[0]?.text || "";
-  } catch (err) {
-    console.error("Anthropic Doc Analysis error:", err?.response?.data || err.message);
-    return "";
-  }
+    ]
+  });
+  return resp.data.choices?.[0]?.message?.content || '';
 }
 
-// 4. Mistral
-async function callMistral(text) {
+// Handle an upload_document message
+async function handleUpload(ws, data) {
   try {
-    const response = await axios.post(
-      "https://api.mistral.ai/v1/chat/completions",
-      {
-        model: "mistral-large-latest",
-        messages: [{ role: "user", content: text }]
-      },
-      {
-        headers: {
-          "Authorization": `Bearer ${process.env.MISTRAL_API_KEY}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-    return response.data.choices?.[0]?.message?.content || "";
+    const { filename, mimetype, content: b64 } = data;
+    const buffer = Buffer.from(b64, 'base64');
+    const { document_type, confidence_score } = detectDocType(mimetype);
+
+    let text = '';
+    let analysis = '';
+
+    if (document_type === 'pdf') {
+      const parsed = await pdfParse(buffer);
+      text = parsed.text;
+      analysis = await multiProviderDocAnalysis(text);
+
+    } else if (document_type === 'docx') {
+      const res = await mammoth.extractRawText({ buffer });
+      text = res.value;
+      analysis = await multiProviderDocAnalysis(text);
+
+    } else if (['png', 'jpeg', 'jpg'].includes(document_type)) {
+      // Use OpenAI Vision for images
+      analysis = await analyzeImageWithOpenAI(buffer, mimetype);
+      text = '[Image processed by OpenAI Vision]';
+
+    } else {
+      throw new Error('Unsupported file type');
+    }
+
+    ws.send(JSON.stringify({
+      type: 'upload_ack',
+      filename,
+      text,
+      analysis,
+      document_type,
+      confidence_score
+    }));
+
   } catch (err) {
-    console.error("Mistral Doc Analysis error:", err?.response?.data || err.message);
-    return "";
+    console.error('Upload handler error:', err);
+    ws.send(JSON.stringify({
+      type: 'upload_error',
+      error: err.message || 'Failed to process document'
+    }));
   }
 }
 
-// ==== Multi-provider fallback ====
-async function multiProviderDocAnalysis(text) {
-  const providers = [
-    { name: "OpenAI",    fn: callOpenAI,    key: process.env.OPENAI_API_KEY },
-    { name: "Gemini",    fn: callGemini,    key: process.env.GEMINI_API_KEY },
-    { name: "Anthropic", fn: callAnthropic, key: process.env.ANTHROPIC_API_KEY },
-    { name: "Mistral",   fn: callMistral,   key: process.env.MISTRAL_API_KEY }
-  ];
-  for (const provider of providers) {
-    if (!provider.key) continue;
+// Handle an ask_question message
+async function handleQuestion(ws, data) {
+  try {
+    const prompt = `${data.doc_text}\n\nUSER QUESTION: ${data.question}`;
+    const answer = await multiProviderDocAnalysis(prompt);
+    ws.send(JSON.stringify({
+      type: 'chat_response',
+      answer
+    }));
+  } catch (err) {
+    console.error('Question handler error:', err);
+    ws.send(JSON.stringify({
+      type: 'chat_response',
+      answer: 'Error answering your question.'
+    }));
+  }
+}
+
+// Attach handlers to a WebSocket connection
+function setupDocumentHandler(ws) {
+  ws.on('message', async raw => {
+    let data;
     try {
-      const result = await provider.fn(text);
-      if (result && result.trim() && !result.startsWith("[")) {
-        console.log(`[Doc Analysis] Provided by: ${provider.name}`);
-        return result;
-      }
-    } catch (err) {
-      // Already logged above
+      data = JSON.parse(raw);
+    } catch {
+      return ws.send(JSON.stringify({
+        type: 'upload_error',
+        error: 'Invalid message format'
+      }));
     }
-  }
-  return "Sorry, all AI providers failed to respond. Please try again later.";
+
+    if (data.type === 'upload_document') {
+      await handleUpload(ws, data);
+    } else if (data.type === 'ask_question') {
+      await handleQuestion(ws, data);
+    }
+    // other message types (e.g. /imagine) can be handled elsewhere
+  });
 }
 
-// ==== /api/document handler ====
-const handleDocumentUpload = [
-  upload.single('file'),
-  async (req, res) => {
-    try {
-      let fileText = "";
-      const { document_type, confidence_score } = detectDocType(req.file);
-
-      if (req.file.mimetype === "application/pdf") {
-        const data = await pdfParse(req.file.buffer);
-        fileText = data.text;
-      } else if (req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-        const result = await mammoth.extractRawText({ buffer: req.file.buffer });
-        fileText = result.value;
-      } else if (req.file.mimetype === "image/png" || req.file.mimetype === "image/jpeg") {
-        const result = await Tesseract.recognize(req.file.buffer, 'eng');
-        fileText = result.data.text;
-      }
-
-      const analysis = await multiProviderDocAnalysis(fileText);
-
-      res.json({
-        text: fileText,
-        analysis,
-        document_type,
-        confidence_score
-      });
-    } catch (err) {
-      console.error('Doc upload error:', err);
-      res.status(500).json({ error: "Failed to analyze document." });
-    }
-  }
-];
-
-// ==== /api/analyze-document handler ====
-const handleAnalyzeDocument = async (req, res) => {
-  try {
-    const { doc_text } = req.body;
-    if (!doc_text || typeof doc_text !== 'string' || !doc_text.trim()) {
-      return res.status(400).json({ error: "No document text provided." });
-    }
-    const analysis = await multiProviderDocAnalysis(doc_text);
-    res.json({ analysis });
-  } catch (err) {
-    console.error('Analyze endpoint error:', err);
-    res.status(500).json({ error: "Failed to analyze document text." });
-  }
-};
-
-module.exports = {
-  handleDocumentUpload,
-  handleAnalyzeDocument,
-  multiProviderDocAnalysis // for advanced chat flows if needed
-};
+module.exports = { setupDocumentHandler };
