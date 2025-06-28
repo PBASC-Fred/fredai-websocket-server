@@ -17,9 +17,11 @@ const app = express();
 const server = http.createServer(app);
 
 // CORS for your front end
+// server.js
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://your-frontend-domain.com',
+  'https://fredai-pbasc-trustedadvisor-project.vercel.app',      // ← add this
+  'https://fredai-pbasc-trustedadvisor-project-2025-ewkl…vercel.app', // ← and any others
   'https://websocket-server-production-433e.up.railway.app'
 ];
 app.use(cors({
