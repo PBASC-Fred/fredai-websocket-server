@@ -24,7 +24,9 @@ const allowedOrigins = [
   "https://fredai-pbasc-trustedadvisor-project.vercel.app",
   "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app",
   "https://websocket-server-production-433e.up.railway.app",
-  "wss://websocket-server-production-433e.up.railway.app"
+  "wss://websocket-server-production-433e.up.railway.app",
+  // ADD THIS LINE:
+  "https://fredai-pbasc-trustedadvisor-project-2025-c1u24ra69.vercel.app"
 ];
 
 // --------- AI PROVIDERS ---------
