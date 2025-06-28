@@ -1,267 +1,212 @@
-// server.js - Modular AI chat/image/websocket, file upload routed to documenthandler
+// server.js
 
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
+const WebSocket = require('ws');
+const axios = require('axios');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
+const Tesseract = require('tesseract.js');
+const { Configuration, OpenAIApi } = require('openai');
+const { multiProviderDocAnalysis } = require('./ai');
 require('dotenv').config();
-const {
-  handleDocumentUpload,
-  handleAnalyzeDocument,
-} = require('./documenthandler');
 
 const app = express();
 const server = http.createServer(app);
 
 // --------- Allowed Origins ---------
 const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:3002",
-  "https://fredai-pbasc-trustedadvisor-project.vercel.app",
-  "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app",
-  "https://fredai-pnxkiveu1-pbasc-trustadvisor-chat.vercel.app",
-  "https://fredai-pbasc-trustedadvisor-project-2025-lff7121at.vercel.app",
-  "https://websocket-server-production-433e.up.railway.app",
-  "wss://websocket-server-production-433e.up.railway.app"
+  'http://localhost:3000',
+  'http://localhost:3002',
+  'https://fredai-pbasc-trustedadvisor-project.vercel.app',
+  'https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app',
+  'https://fredai-pnxkiveu1-pbasc-trustadvisor-chat.vercel.app',
+  'https://fredai-pbasc-trustedadvisor-project-2025-lff7121at.vercel.app',
+  'https://websocket-server-production-433e.up.railway.app',
+  'wss://websocket-server-production-433e.up.railway.app'
 ];
 
-// --------- AI PROVIDERS ---------
-async function callGemini(prompt) {
-  try {
-    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + process.env.GEMINI_API_KEY;
-    const response = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
-    return response.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  } catch (err) {
-    console.error("Gemini error:", err?.response?.data || err.message);
-    return "";
-  }
+// --------- OpenAI Vision Client ---------
+const openai = new OpenAIApi(new Configuration({
+  apiKey: process.env.OPENAI_API_KEY
+}));
+
+// --------- Helpers ---------
+function detectDocType(mimetype) {
+  const map = {
+    'application/pdf': 'pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'image/png': 'png',
+    'image/jpeg': 'jpeg',
+    'image/jpg': 'jpg'
+  };
+  const document_type = map[mimetype] || 'unknown';
+  const confidence_score = document_type === 'unknown' ? 0.5 : 1.0;
+  return { document_type, confidence_score };
 }
 
-async function callOpenAI(prompt) {
-  try {
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
+async function analyzeImageWithOpenAI(buffer, mimetype) {
+  const b64 = buffer.toString('base64');
+  const dataUrl = `data:${mimetype};base64,${b64}`;
+  const resp = await openai.createChatCompletion({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'system', content: 'You are an expert at understanding document images.' },
+      { role: 'user', content: 'Extract any text and summarize the content of this document image.' },
       {
-        model: "gpt-4o",
-        messages: [{ role: "user", content: prompt }]
-      },
-      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
-    );
-    return response.data.choices?.[0]?.message?.content || "";
-  } catch (err) {
-    console.error("OpenAI error:", err?.response?.data || err.message);
-    return "";
-  }
+        type: 'input_image',
+        image_url: dataUrl,
+        detail: 'high'
+      }
+    ]
+  });
+  return resp.data.choices?.[0]?.message?.content || '';
 }
 
-async function callAnthropic(prompt) {
-  try {
-    const response = await axios.post(
-      "https://api.anthropic.com/v1/messages",
-      {
-        model: "claude-3-opus-20240229",
-        max_tokens: 2048,
-        messages: [{ role: "user", content: prompt }]
-      },
-      {
-        headers: {
-          "x-api-key": process.env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json"
-        }
-      }
-    );
-    return response.data?.content?.[0]?.text || "";
-  } catch (err) {
-    console.error("Anthropic error:", err?.response?.data || err.message);
-    return "";
-  }
-}
-
-async function callMistral(prompt) {
-  try {
-    const response = await axios.post(
-      "https://api.mistral.ai/v1/chat/completions",
-      {
-        model: "mistral-large-latest",
-        messages: [{ role: "user", content: prompt }]
-      },
-      {
-        headers: {
-          "Authorization": `Bearer ${process.env.MISTRAL_API_KEY}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-    return response.data.choices?.[0]?.message?.content || "";
-  } catch (err) {
-    console.error("Mistral error:", err?.response?.data || err.message);
-    return "";
-  }
-}
-
-// --------- Stability AI IMAGE GENERATION ---------
-async function callStability(prompt) {
-  try {
-    const response = await axios.post(
-      "https://api.stability.ai/v2beta/stable-image/generate/core",
-      {
-        prompt,
-        output_format: "png",
-        aspect_ratio: "1:1"
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.STABILITY_API_KEY}`,
-          Accept: "application/json"
-        }
-      }
-    );
-    if (response.data && response.data.image) {
-      if (/^[A-Za-z0-9+/=]+$/.test(response.data.image.trim())) {
-        return `data:image/png;base64,${response.data.image}`;
-      }
-      if (response.data.image.startsWith("http")) {
-        return response.data.image;
-      }
-    }
-    if (response.data && response.data.url) {
-      return response.data.url;
-    }
-    return "[Image not generated]";
-  } catch (err) {
-    console.error("Stability error:", err?.response?.data || err.message);
-    return "[Error generating image]";
-  }
-}
-
-// --------- AI Fallback Chat Handler ---------
 async function fallbackAIChat(userMessage) {
   const providers = [
-    { name: "Gemini",    fn: callGemini,    key: process.env.GEMINI_API_KEY },
-    { name: "OpenAI",    fn: callOpenAI,    key: process.env.OPENAI_API_KEY },
-    { name: "Anthropic", fn: callAnthropic, key: process.env.ANTHROPIC_API_KEY },
-    { name: "Mistral",   fn: callMistral,   key: process.env.MISTRAL_API_KEY }
+    { name: 'OpenAI', fn: async (p) => (await openai.createChatCompletion({ model: 'gpt-4o', messages: [{ role: 'user', content: p }] })).data.choices[0].message.content, key: process.env.OPENAI_API_KEY },
+    // add Gemini, Anthropic, Mistral here if desired…
   ];
-  for (const provider of providers) {
-    if (!provider.key) continue;
+  for (const prov of providers) {
+    if (!prov.key) continue;
     try {
-      const reply = await provider.fn(userMessage);
-      if (reply && !reply.startsWith("[")) {
-        console.log(`[AI reply] via ${provider.name}`);
-        return reply;
-      }
-    } catch (err) {
-      console.warn(`Provider ${provider.name} threw error:`, err.message);
-    }
+      const reply = await prov.fn(userMessage);
+      if (reply) return reply;
+    } catch { /* ignore */ }
   }
-  return "Sorry, all AI providers failed to respond. Please try again later.";
+  return 'Sorry, all AI providers failed.';
 }
 
-// --------- EXPRESS SETUP ---------
+// --------- CORS & JSON ---------
 app.use(cors({
-  origin: (origin, callback) => {
-    // allow requests with no origin (e.g. mobile apps)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error('Not allowed by CORS'));
   }
 }));
 app.use(express.json());
 
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.status(200).send('FredAI WebSocket server is running.');
-});
-
-// Document upload endpoint (POST /api/document)
-app.post('/api/document', handleDocumentUpload);
-
-// Analyze document text (POST /api/analyze-document)
-app.post('/api/analyze-document', handleAnalyzeDocument);
-
-
-// --------- WEBSOCKET SERVER ---------
-const wss = new WebSocket.Server({
-  server,
-  verifyClient: (info) => {
-    const origin = info.origin;
-    const allowed = allowedOrigins.includes(origin) || !origin;
-    console.log('[WS] Incoming connection from:', origin, '-> allowed:', allowed);
-    return allowed;
+// --------- Multer for HTTP Uploads ---------
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','image/png','image/jpeg'];
+    cb(null, allowed.includes(file.mimetype));
   }
 });
 
-wss.on('connection', (ws, req) => {
-  const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  console.log('[WS] New client connected:', sessionId);
+// --------- HTTP Endpoints ---------
+// Upload & analyze document
+app.post('/api/document', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file.' });
+    const { document_type, confidence_score } = detectDocType(req.file.mimetype);
+    let text = '', analysis = '';
 
-  ws.send(JSON.stringify({
-    type: 'welcome',
-    content: "Welcome! I'm your Trusted AI Advisor.",
-    timestamp: new Date().toISOString()
-  }));
+    if (document_type === 'pdf') {
+      text = (await pdfParse(req.file.buffer)).text;
+      analysis = await multiProviderDocAnalysis(text);
 
-  ws.on('message', async (data) => {
-    let message;
-    try {
-      message = JSON.parse(data.toString());
-    } catch (err) {
-      ws.send(JSON.stringify({
-        type: 'bot',
-        content: 'Internal error: invalid message format.',
-        timestamp: new Date().toISOString()
-      }));
-      return;
+    } else if (document_type === 'docx') {
+      text = (await mammoth.extractRawText({ buffer: req.file.buffer })).value;
+      analysis = await multiProviderDocAnalysis(text);
+
+    } else {
+      text = '[Image]';
+      analysis = await analyzeImageWithOpenAI(req.file.buffer, req.file.mimetype);
     }
-    try {
-      // /imagine image generation
-      let userMessage = message.message || "";
-      if (typeof userMessage === "string" && userMessage.trim().toLowerCase().startsWith("/imagine")) {
-        const imgPrompt = userMessage.replace(/^\/imagine\s*/i, "").trim();
-        if (imgPrompt.length === 0) {
-          ws.send(JSON.stringify({
-            type: "bot",
-            content: "Please provide a prompt after `/imagine` for image generation.",
-            timestamp: new Date().toISOString()
-          }));
-          return;
+
+    res.json({ text, analysis, document_type, confidence_score });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Analysis failed.' });
+  }
+});
+
+// Analyze raw text
+app.post('/api/analyze-document', async (req, res) => {
+  try {
+    const { doc_text } = req.body;
+    if (!doc_text) return res.status(400).json({ error: 'No text.' });
+    const analysis = await multiProviderDocAnalysis(doc_text);
+    res.json({ analysis });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Analysis failed.' });
+  }
+});
+
+// Health check
+app.get('/', (req, res) => res.send('FredAI server running'));
+
+// --------- WebSocket Server ---------
+const wss = new WebSocket.Server({
+  server,
+  verifyClient: info => !info.origin || allowedOrigins.includes(info.origin)
+});
+
+// Handle all WS messages in one place
+wss.on('connection', ws => {
+  ws.send(JSON.stringify({ type: 'welcome', content: 'Connected to FredAI.' }));
+
+  ws.on('message', async raw => {
+    let msg;
+    try { msg = JSON.parse(raw); }
+    catch { return ws.send(JSON.stringify({ type: 'bot', content: 'Bad JSON.' })); }
+
+    if (msg.type === 'upload_document') {
+      // decode
+      const buf = Buffer.from(msg.content, 'base64');
+      const { document_type, confidence_score } = detectDocType(msg.mimetype);
+      let text = '', analysis = '';
+
+      try {
+        if (document_type === 'pdf') {
+          text = (await pdfParse(buf)).text;
+          analysis = await multiProviderDocAnalysis(text);
+        } else if (document_type === 'docx') {
+          text = (await mammoth.extractRawText({ buffer: buf })).value;
+          analysis = await multiProviderDocAnalysis(text);
+        } else {
+          text = '[Image]';
+          analysis = await analyzeImageWithOpenAI(buf, msg.mimetype);
         }
-        const img = await callStability(imgPrompt);
         ws.send(JSON.stringify({
-          type: "image",
-          content: img,
-          timestamp: new Date().toISOString()
+          type: 'upload_ack',
+          filename: msg.filename,
+          text,
+          analysis,
+          document_type,
+          confidence_score
         }));
-      } else {
-        // fallback chat!
-        const botResponse = await fallbackAIChat(userMessage);
-        ws.send(JSON.stringify({
-          type: 'bot',
-          content: botResponse,
-          timestamp: new Date().toISOString()
-        }));
+      } catch (e) {
+        ws.send(JSON.stringify({ type: 'upload_error', error: e.message }));
       }
-    } catch (err) {
-      console.error('[WS] Error in chat handling:', err);
-      ws.send(JSON.stringify({
-        type: 'bot',
-        content: "Sorry, an error occurred processing your message.",
-        timestamp: new Date().toISOString()
-      }));
+
+    } else if (msg.type === 'ask_question') {
+      try {
+        const prompt = `${msg.doc_text}\n\nUSER: ${msg.question}`;
+        const answer = await multiProviderDocAnalysis(prompt);
+        ws.send(JSON.stringify({ type: 'chat_response', answer }));
+      } catch (e) {
+        ws.send(JSON.stringify({ type: 'chat_response', answer: 'Error answering.' }));
+      }
+
+    } else if (typeof msg.message === 'string') {
+      // fallback chat
+      const reply = await fallbackAIChat(msg.message);
+      ws.send(JSON.stringify({ type: 'bot', content: reply }));
     }
-  });
-
-  ws.on('close', () => {
-    console.log('[WS] Client disconnected:', sessionId);
-  });
-
-  ws.on('error', (error) => {
-    console.error('[WS] WebSocket error:', error);
   });
 });
 
-// Start the server
+// Start listening
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-  console.log(`WebSocket server running on port ${PORT}`);
+  console.log(`Server live on port ${PORT}`);
 });
