@@ -1,4 +1,4 @@
-/// server.js - AI fallback chat, image generation, document analysis, WebSocket
+// server.js - AI fallback chat, image generation, document analysis, WebSocket
 
 const express = require('express');
 const http = require('http');
@@ -21,10 +21,13 @@ const allowedOrigins = [
   "http://localhost:3002",
   "https://fredai-pbasc-trustedadvisor-project.vercel.app",
   "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app",
-  "https://fredai-pbasc-trustedadvisor-project-2025-c1u24ra69.vercel.app",
+  "https://fredai-pnxkiveu1-pbasc-trustadvisor-chat.vercel.app", // <-- ADD THIS!
   "https://websocket-server-production-433e.up.railway.app",
   "wss://websocket-server-production-433e.up.railway.app"
+  "https://fredai-pbasc-trustedadvisor-project-2025-lff7121at.vercel.app"
+  "https://fredai-1htwhhh4e-pbasc-trustadvisor-chat.vercel.app"
 ];
+
 
 // ---- Health check route (ALWAYS 200, even for bots/screenshots) ----
 app.get('/', (req, res) => {
