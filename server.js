@@ -21,11 +21,10 @@ const allowedOrigins = [
   "http://localhost:3002",
   "https://fredai-pbasc-trustedadvisor-project.vercel.app",
   "https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app",
-  "https://fredai-pnxkiveu1-pbasc-trustadvisor-chat.vercel.app", // <-- ADD THIS!
+  "https://fredai-pnxkiveu1-pbasc-trustadvisor-chat.vercel.app",
+  "https://fredai-pbasc-trustedadvisor-project-2025-lff7121at.vercel.app", // <-- your new domain here
   "https://websocket-server-production-433e.up.railway.app",
   "wss://websocket-server-production-433e.up.railway.app"
-  "https://fredai-pbasc-trustedadvisor-project-2025-lff7121at.vercel.app"
-  "https://fredai-1htwhhh4e-pbasc-trustadvisor-chat.vercel.app"
 ];
 
 
