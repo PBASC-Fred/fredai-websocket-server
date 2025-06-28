@@ -8,6 +8,7 @@ const axios = require('axios');
 require('dotenv').config();
 
 const {
+  upload,
   handleDocumentUpload,
   handleAnalyzeDocument,
   analyzeDocument
@@ -175,7 +176,7 @@ app.get('/', (req, res) => {
 });
 
 // --------- Document Analysis Routes ---------
-app.post('/api/document', handleDocumentUpload);
+app.post('/api/document', upload.single('file'), handleDocumentUpload);
 app.post('/api/analyze-document', handleAnalyzeDocument);
 
 // --------- WEBSOCKET SERVER ---------
@@ -212,9 +213,32 @@ wss.on('connection', (ws, req) => {
       return;
     }
     try {
+      // Interactive document chat handler
+      if (message.type === "document_chat") {
+        const { doc_text, userMessage } = message;
+        if (!doc_text || !userMessage) {
+          ws.send(JSON.stringify({
+            type: 'bot',
+            content: 'Missing document or question for document chat.',
+            timestamp: new Date().toISOString()
+          }));
+          return;
+        }
+        const aiReply = await analyzeDocument(
+          `DOCUMENT:\n${doc_text}\n\nUSER QUESTION:\n${userMessage}\n\nPlease answer using only information from the document above.`
+        );
+        ws.send(JSON.stringify({
+          type: 'document_chat_complete',
+          answer: aiReply,
+          timestamp: new Date().toISOString()
+        }));
+        return;
+      }
+
       // /imagine image generation
-      if (typeof message.message === "string" && message.message.trim().toLowerCase().startsWith("/imagine")) {
-        const imgPrompt = message.message.replace(/^\/imagine\s*/i, "").trim();
+      let userMessage = message.message || "";
+      if (typeof userMessage === "string" && userMessage.trim().toLowerCase().startsWith("/imagine")) {
+        const imgPrompt = userMessage.replace(/^\/imagine\s*/i, "").trim();
         if (imgPrompt.length === 0) {
           ws.send(JSON.stringify({
             type: "bot",
@@ -229,15 +253,23 @@ wss.on('connection', (ws, req) => {
           content: img,
           timestamp: new Date().toISOString()
         }));
-        return;
+      } else if (message.type === "doc") {
+        // Document analysis single-shot
+        const analysis = await analyzeDocument(userMessage);
+        ws.send(JSON.stringify({
+          type: "bot",
+          content: analysis,
+          timestamp: new Date().toISOString()
+        }));
+      } else {
+        // fallback chat!
+        const botResponse = await fallbackAIChat(userMessage);
+        ws.send(JSON.stringify({
+          type: 'bot',
+          content: botResponse,
+          timestamp: new Date().toISOString()
+        }));
       }
-      // Standard chat (AI fallback)
-      const botResponse = await fallbackAIChat(message.message);
-      ws.send(JSON.stringify({
-        type: 'bot',
-        content: botResponse,
-        timestamp: new Date().toISOString()
-      }));
     } catch (err) {
       console.error('[WS] Error in chat handling:', err);
       ws.send(JSON.stringify({
@@ -246,4 +278,19 @@ wss.on('connection', (ws, req) => {
         timestamp: new Date().toISOString()
       }));
     }
-  });  
+  });
+
+  ws.on('close', () => {
+    console.log('[WS] Client disconnected:', sessionId);
+  });
+
+  ws.on('error', (error) => {
+    console.error('[WS] WebSocket error:', error);
+  });
+});
+
+// --------- Start Server ---------
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log(`WebSocket server running on port ${PORT}`);
+});
