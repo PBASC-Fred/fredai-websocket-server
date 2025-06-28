@@ -1,15 +1,17 @@
-// documenthandler.js - Modular Document Upload & AI Analysis
+// documenthandler.js
 
+const express = require('express');
 const multer = require('multer');
 const mammoth = require('mammoth');
-const pdfParse = require('pdf-parse');
-const Tesseract = require('tesseract.js');
 const axios = require('axios');
+const pdfParse = require('pdf-parse');
 
-// --- Multer Setup (Memory Storage) ---
+const router = express.Router();
+
+// ========== Multer Setup ==========
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
       'application/pdf',
@@ -18,11 +20,11 @@ const upload = multer({
       'image/jpeg'
     ];
     if (allowedTypes.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Invalid file type. Only PDF, DOCX, PNG, and JPEG allowed.'));
+    else cb(new Error('Invalid file type. Only PDF, DOCX, PNG, JPEG allowed.'));
   }
 });
 
-// --- Document Type Detection ---
+// ========== Helper: Detect Doc Type ==========
 function detectDocType(file) {
   const typeMap = {
     'application/pdf': 'pdf',
@@ -35,7 +37,7 @@ function detectDocType(file) {
   return { document_type, confidence_score };
 }
 
-// --- OpenAI Document Analysis ---
+// ========== AI Document Analysis (OpenAI Example) ==========
 async function analyzeDocument(text) {
   try {
     const response = await axios.post(
@@ -56,43 +58,44 @@ async function analyzeDocument(text) {
   }
 }
 
-// --- /api/document: File Upload + Extract + Analyze ---
-const handleDocumentUpload = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No file uploaded." });
+// ========== Route Handler: /api/document ==========
+const handleDocumentUpload = [
+  upload.single('file'),
+  async (req, res) => {
+    try {
+      let fileText = "";
+      const { document_type, confidence_score } = detectDocType(req.file);
+
+      if (req.file.mimetype === "application/pdf") {
+        const data = await pdfParse(req.file.buffer);
+        fileText = data.text;
+      } else if (req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+        const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+        fileText = result.value;
+      } else if (req.file.mimetype === "image/png" || req.file.mimetype === "image/jpeg") {
+        const Tesseract = require('tesseract.js');
+        const result = await Tesseract.recognize(req.file.buffer, 'eng');
+        fileText = result.data.text;
+      } else {
+        return res.status(400).json({ error: "Unsupported file type." });
+      }
+
+      const analysis = await analyzeDocument(fileText);
+
+      res.json({
+        text: fileText,
+        analysis,
+        document_type,
+        confidence_score
+      });
+    } catch (err) {
+      console.error('Doc upload error:', err);
+      res.status(500).json({ error: "Failed to analyze document." });
     }
-    let fileText = "";
-    const { document_type, confidence_score } = detectDocType(req.file);
-
-    if (req.file.mimetype === "application/pdf") {
-      const data = await pdfParse(req.file.buffer);
-      fileText = data.text;
-    } else if (req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-      const result = await mammoth.extractRawText({ buffer: req.file.buffer });
-      fileText = result.value;
-    } else if (req.file.mimetype === "image/png" || req.file.mimetype === "image/jpeg") {
-      const result = await Tesseract.recognize(req.file.buffer, 'eng');
-      fileText = result.data.text;
-    } else {
-      fileText = "[Unsupported file type]";
-    }
-
-    const analysis = await analyzeDocument(fileText);
-
-    res.json({
-      text: fileText,
-      analysis,
-      document_type,
-      confidence_score
-    });
-  } catch (err) {
-    console.error('Doc upload error:', err);
-    res.status(500).json({ error: "Failed to analyze document." });
   }
-};
+];
 
-// --- /api/analyze-document: Raw Text Only ---
+// ========== Route Handler: /api/analyze-document ==========
 const handleAnalyzeDocument = async (req, res) => {
   try {
     const { doc_text } = req.body;
@@ -107,10 +110,14 @@ const handleAnalyzeDocument = async (req, res) => {
   }
 };
 
+// ========== (Optional) Attach to Express Router ==========
+router.post('/', ...handleDocumentUpload);
+router.post('/analyze', handleAnalyzeDocument);
+
+// ========== Export Handlers and Router ==========
 module.exports = {
-  upload,                 // Use as middleware: upload.single('file')
-  detectDocType,
-  analyzeDocument,
   handleDocumentUpload,
-  handleAnalyzeDocument
+  handleAnalyzeDocument,
+  analyzeDocument,
+  documentRoutes: router
 };
