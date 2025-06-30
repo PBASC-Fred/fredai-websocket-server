@@ -17,10 +17,9 @@ const server = http.createServer(app);
 // --- CORS ---
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://your-frontend-domain.com',
-  'fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app',
-  'https://fredai-pbasc-trustedadvisor-project.vercel.app/',
-  'websocket-server-production-433e.up.railway.app'
+  'https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app',
+  'https://fredai-pbasc-trustedadvisor-project.vercel.app',
+  'https://websocket-server-production-433e.up.railway.app'
 ];
 app.use(cors({
   origin: (origin, callback) => {
