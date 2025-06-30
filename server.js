@@ -8,21 +8,147 @@ const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const Tesseract = require('tesseract.js');
-const { OpenAI } = require('openai');
 const axios = require('axios');
 
-// If you have a multiProviderDocAnalysis helper, keep it:
-// const { multiProviderDocAnalysis } = require('./ai');
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 
+// ---------------------- MULTI PROVIDER FALLBACK LOGIC -----------------------
+console.log('AI Provider Keys:');
+['GEMINI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'MISTRAL_API_KEY'].forEach(k => {
+  console.log(`  ${k}:`, process.env[k] ? '✅' : '❌');
+});
+
+async function tryGemini(message) {
+  if (!GEMINI_API_KEY) throw new Error("Missing GEMINI_API_KEY");
+  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`;
+  const payload = {
+    contents: [{
+      parts: [{
+        text: `You are FredAi, a trusted AI advisor specializing in taxes, budgeting, savings, and financial planning. Please provide helpful, accurate financial advice. User question: ${message}`
+      }]
+    }]
+  };
+  const res = await axios.post(url, payload, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });
+  const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("Gemini response missing content");
+  return text;
+}
+
+async function tryOpenAI(message) {
+  if (!OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY");
+  const res = await axios.post(
+    "https://api.openai.com/v1/chat/completions",
+    {
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: "You are FredAi, a trusted AI advisor specializing in taxes, budgeting, savings, and financial planning." },
+        { role: "user", content: message }
+      ]
+    },
+    { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+  );
+  const text = res.data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error("OpenAI response missing content");
+  return text;
+}
+
+async function tryClaude(message) {
+  if (!ANTHROPIC_API_KEY) throw new Error("Missing ANTHROPIC_API_KEY");
+  const res = await axios.post(
+    "https://api.anthropic.com/v1/messages",
+    {
+      model: "claude-3-haiku-20240307",
+      max_tokens: 1000,
+      messages: [{ role: "user", content: `You are FredAi, a trusted AI advisor. User question: ${message}` }]
+    },
+    {
+      headers: {
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json'
+      },
+      timeout: 10000
+    }
+  );
+  const text = res.data?.content?.[0]?.text;
+  if (!text) throw new Error("Claude response missing content");
+  return text;
+}
+
+async function tryMistral(message) {
+  if (!MISTRAL_API_KEY) throw new Error("Missing MISTRAL_API_KEY");
+  const res = await axios.post(
+    "https://api.mistral.ai/v1/chat/completions",
+    {
+      model: "mistral-medium",
+      messages: [
+        { role: "system", content: "You are FredAi, a trusted AI advisor in finance." },
+        { role: "user", content: message }
+      ]
+    },
+    { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+  );
+  const text = res.data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error("Mistral response missing content");
+  return text;
+}
+
+const providers = {
+  Gemini: tryGemini,
+  OpenAI: tryOpenAI,
+  Claude: tryClaude,
+  Mistral: tryMistral
+};
+
+const metrics = {}; // { provider: { success, fail, totalMs } }
+
+async function generateTrustedResponse(message, fallbackChain = null) {
+  const chain = fallbackChain || ['Gemini', 'OpenAI', 'Claude', 'Mistral'];
+  for (const name of chain) {
+    const start = Date.now();
+    try {
+      console.log(`[AI:${name}] Trying`);
+      const result = await providers[name](message);
+      const duration = Date.now() - start;
+      metrics[name] = metrics[name] || { success: 0, fail: 0, totalMs: 0 };
+      metrics[name].success++;
+      metrics[name].totalMs += duration;
+      console.log(`[AI:${name}] Success in ${duration}ms`);
+      return { result, provider: name, duration };
+    } catch (err) {
+      const duration = Date.now() - start;
+      metrics[name] = metrics[name] || { success: 0, fail: 0, totalMs: 0 };
+      metrics[name].fail++;
+      metrics[name].totalMs += duration;
+      console.log(`[AI:${name}] Failed in ${duration}ms: ${err.message}`);
+    }
+  }
+  return {
+    result: "I'm sorry, none of the AI providers were able to respond. Please try again later.",
+    provider: null,
+    duration: 0
+  };
+}
+
+function getMetrics() {
+  return metrics;
+}
+// -----------------------------------------------------------------------------
+
+
+// --------------- Express & WebSocket Setup ---------------
 const app = express();
 const server = http.createServer(app);
 
-// CORS setup
 const allowedOrigins = [
   'http://localhost:3000',
   'https://your-frontend-domain.com',
   'https://websocket-server-production-433e.up.railway.app'
 ];
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
@@ -46,23 +172,6 @@ const upload = multer({
     cb(null, allowed.includes(file.mimetype));
   }
 });
-
-// Instantiate new v4 OpenAI client
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// Fallback AI chat (you can extend this to other providers)
-async function fallbackAI(prompt) {
-  try {
-    const resp = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }]
-    });
-    return resp.choices[0].message.content;
-  } catch (err) {
-    console.error('OpenAI error:', err);
-    return 'Sorry, AI request failed.';
-  }
-}
 
 // Helper to detect doc type
 function detectDocType(mimetype) {
@@ -91,14 +200,16 @@ app.post('/api/document', upload.single('file'), async (req, res) => {
     }
 
     // Analyze via AI
-    analysis = await fallbackAI(text);
+    const aiResp = await generateTrustedResponse(text);
+    analysis = aiResp.result;
 
     const document_type = detectDocType(mimetype);
     return res.json({
       text,
       analysis,
       document_type,
-      confidence_score: 1.0
+      confidence_score: 1.0,
+      ai_provider: aiResp.provider
     });
   } catch (err) {
     console.error('HTTP /api/document error:', err);
@@ -111,22 +222,21 @@ app.post('/api/analyze-document', async (req, res) => {
   try {
     const { doc_text } = req.body;
     if (!doc_text) return res.status(400).json({ error: 'No doc_text provided.' });
-    const analysis = await fallbackAI(doc_text);
-    return res.json({ analysis });
+    const aiResp = await generateTrustedResponse(doc_text);
+    return res.json({ analysis: aiResp.result, ai_provider: aiResp.provider });
   } catch (err) {
     console.error('HTTP /api/analyze-document error:', err);
     return res.status(500).json({ error: 'Failed to analyze text.' });
   }
 });
 
-// WebSocket server
+// ------------------- WebSocket server -------------------
 const wss = new WebSocket.Server({
   server,
   verifyClient: info => !info.origin || allowedOrigins.includes(info.origin)
 });
 
 wss.on('connection', ws => {
-  // welcome message
   ws.send(JSON.stringify({
     type: 'welcome',
     content: "Welcome! You're connected to the AI WebSocket.",
@@ -155,30 +265,34 @@ wss.on('connection', ws => {
           text = (await Tesseract.recognize(buf, 'eng')).data.text;
         }
 
-        analysis = await fallbackAI(text);
+        const aiResp = await generateTrustedResponse(text);
+        analysis = aiResp.result;
+
         return ws.send(JSON.stringify({
           type: 'upload_ack',
           filename: msg.filename,
           text,
           analysis,
           document_type: detectDocType(msg.mimetype),
-          confidence_score: 1.0
+          confidence_score: 1.0,
+          ai_provider: aiResp.provider
         }));
       }
 
       // 2) ask_question about a document
       if (msg.type === 'ask_question') {
         const prompt = `${msg.doc_text}\n\nUSER QUESTION: ${msg.question}`;
-        const answer = await fallbackAI(prompt);
-        return ws.send(JSON.stringify({ type: 'chat_response', answer }));
+        const aiResp = await generateTrustedResponse(prompt);
+        return ws.send(JSON.stringify({ type: 'chat_response', answer: aiResp.result, ai_provider: aiResp.provider }));
       }
 
       // 3) general chat fallback
       if (typeof msg.message === 'string') {
-        const reply = await fallbackAI(msg.message);
+        const aiResp = await generateTrustedResponse(msg.message);
         return ws.send(JSON.stringify({
           type: 'bot',
-          content: reply,
+          content: aiResp.result,
+          provider: aiResp.provider,
           timestamp: new Date().toISOString()
         }));
       }
