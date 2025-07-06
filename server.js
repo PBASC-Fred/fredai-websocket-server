@@ -21,6 +21,7 @@ const allowedOrigins = [
   'https://fredai-pbasc-trustedadvisor-project.vercel.app',
   'https://websocket-server-production-433e.up.railway.app'
 ];
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
@@ -210,13 +211,14 @@ app.post('/api/generate-image', async (req, res) => {
 // --- WebSocket Server ---
 const wss = new WebSocket.Server({
   server,
+  path: '/ws',
   verifyClient: info => !info.origin || allowedOrigins.includes(info.origin)
 });
 
 wss.on('connection', ws => {
   ws.send(JSON.stringify({
     type: 'welcome',
-    content: "Welcome! You're connected to the AI WebSocket.",
+    content: "Welcome! You're connected to the Fred AI.",
     timestamp: new Date().toISOString()
   }));
 
