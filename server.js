@@ -19,7 +19,11 @@ const allowedOrigins = [
   'http://localhost:3000',
   'https://fredai-pbasc-trustedadvisor-project-202-pbasc-trustadvisor-chat.vercel.app',
   'https://fredai-pbasc-trustedadvisor-project.vercel.app',
-  'https://websocket-server-production-433e.up.railway.app'
+  'https://websocket-server-production-433e.up.railway.app',
+  'https://fredai-drab.vercel.app/',
+  'https://fredai-drab.vercel.app',
+  'https://fredai.io',
+  'https://websocket-server-production-433e.up.railway.app/ws'
 ];
 
 app.use(cors({
